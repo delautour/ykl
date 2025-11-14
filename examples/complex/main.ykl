@@ -1,0 +1,101 @@
+Style guide:
+
+
+--1
+
+Must be as close to yaml as expected
+Primarily functional
+Each file provides a scope
+
+Syntax Rules:
+
+Each scope can have 'front-matter' whereby everything preceding the first of just `---` is ignored. 
+This is compatible with the `---` used in YAML to start a document
+
+Comments begin with # and must not be in a string literal.
+
+Strings:
+
+String literals
+
+
+Assignment
+`<name> : <expression>`.
+
+Valid examples:
+```
+#1
+foo: 
+  bar:
+    baz
+
+#2
+foo:
+  bar: baz
+
+#3
+foo:bar:baz
+```
+
+
+Assignments are immutable, and variables cannot be reused within a scope
+Variables are gathered within a scope to form an object that is yielded from the function
+Variables beginning with _ are not included in the object
+
+If the keyword `yield` is used within a scope, then the default object is not yielded. 
+    This is to support yielding anonymous objects.
+To support parity with yaml lists; `-` can be used as to yield multiple objects, however this is only valid if no asignments are made within the scope
+If no assignments, yields, or `-` are made or used within a scope, the result of the last expression is yielded
+
+Scopes can be sectioned by usage of the `---` operator. Within each section, the general yield rules above apply. Content above the first occurance of `---` is treated as front-matter
+
+
+Every object is an enumerable: E.g. List monad with single item
+
+All lists can be pipelined using the `|` operator.
+
+Operators:
+
+
+`{}` returns the empty value. 
+
+## Types
+
+### Object
+
+A key value map
+
+Operators:
+
+`+` Binary operator, keys from the RHS are copied to the LHS. Duplicates are replaced
+`+?` Binary operator, keys from the RHS are copied to the LHS. Duplicates are ignored
+`|+` Pipeline merge operator; returns the LHS object with the colon-delimited path on the RHS set to the provided value. Intermediate objects are created as needed.
+
+---
+
+# define a constant called 'deployment'
+deployment: #
+    apiVersion: v1
+    kind: Deployment
+    spec: {}
+
+# define a function called scale, the last expression is yielded, unless one or more yield keywords are used within the definition
+# arguments are passed as deep copies
+scale: deployment, replicas ->
+    deployment |+ spec:replicas: replicas
+
+# partially apply the scale function to the deployment constant
+scaledDeployment: scale deployment
+
+# the file is a function in it own right, and this should return a deployment object
+yield scaledDeployment 3
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+spec: {}
+
+
+---
+

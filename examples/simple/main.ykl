@@ -1,0 +1,17 @@
+---
+apiVersion: v1   
+kind: Deployment    
+metadata:
+  name: "3ber Deployment"
+  namespace: foo
+  labels: 
+    k8s.io/app: "3ber"
+spec:
+  replicas: 3
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: # the new line here starts a new block
+  name: 3mel service account
+  namespace: foo
+spec: {}
