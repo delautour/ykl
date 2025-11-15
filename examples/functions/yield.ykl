@@ -1,0 +1,11 @@
+deployment: #
+    apiVersion: v1
+    kind: Deployment
+
+
+scale:= deployment rep ->
+    deployment +
+        spec:
+            replicas:= rep
+        
+scale deployment 2

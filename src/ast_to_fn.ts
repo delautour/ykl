@@ -1,11 +1,14 @@
+import { resolve } from 'path';
 import * as e from './expression.ts';
 
 export default function astToFn(blk: e.Expression) {
     return (values: Object) => {
-        const ctx =  {values}
+        const ctx =  {values, identifiers: new Map<string, e.Expression>(), stack: []}
         return expressionToFn(blk)(ctx)
     }
 }
+
+const Unit = Symbol("unit")
 
 function expressionToFn(expr: e.Expression): Generator {
     switch (expr.type) {
@@ -13,22 +16,22 @@ function expressionToFn(expr: e.Expression): Generator {
             return blockToFn(expr)
         case "Assignment":
             throw new Error("Assignments are not directly executable")
-        case "String":
-            return () => expr.str
-        case "Number":
-            return () => expr.value
         case "Unit":
-            return () => undefined
+            return () => Unit
         case "Scalar":
             return () => expr.value
         case "Vector":
             return () => expr.value
         case "Yield":
-            return expressionToFn(expr.inner)
+            return expressionToFn(expr.operand)
         case "Lift":
             return liftToFn(expr)
         case "Merge":
             return mergeToFn(expr)
+        case "Application":
+            return applicationToFn(expr)
+        case "Function":
+            return functionToFn(expr)
 
         default: 
             return assertUnreachable(expr)   
@@ -62,18 +65,21 @@ function sectionToFn(section: e.Expression[]): Generator {
     
     return (ctx: Context) => {      
         const assignmentsObj: Object = {}
+        const thisCtx = cloneContext(ctx)
         
         for (const expr of assignments) {
-            assignmentsObj[expr.key] = expressionToFn(expr.expr)(ctx)
+            thisCtx.identifiers.set(expr.key, expr.operand)
+            if (expr.operand.type !== "Function") {
+                assignmentsObj[expr.key] = expressionToFn(expr.operand)(thisCtx)
+            }
         }
 
-        const explicit = yields.map(fn => fn(ctx))
+        const explicit = yields.map(fn => fn(thisCtx))
         if (explicit.length > 0) 
             return explicit
         
         if (lastExpr.type !== "Assignment") 
-            return expressionToFn(lastExpr)(ctx)
-
+            return expressionToFn(lastExpr)(thisCtx)
         return assignmentsObj
     }
 }
@@ -94,15 +100,49 @@ function mergeToFn(expr: e.MergeExpression): Generator {
             }
             return [...lhs, ...rhs]
         } else {
-            if (expr.rhs.cardinality() === "Vector") {
-                throw new Error("Cannot merge Vector into Scalar")
-            }
-            throw new Error("Not implemented: merging two Scalars")
+            return deepMerge(lhs, rhs)
+         
         }
     }
 }
 
+function deepMerge(lhs: Object, rhs: Object): Object {
+    const result: Object = {...lhs}
+    for (const [key, rhsValue] of Object.entries(rhs)) {
+        const lhsValue = lhs[key]
 
+        if(typeof rhsValue === 'object') {
+            if (lhsValue === undefined) {
+                result[key] = rhsValue
+            }
+            else if (typeof lhsValue === 'object') {
+                result[key] = deepMerge(lhsValue as Object, rhsValue as Object)
+            }
+            else {
+                throw new Error(`Cannot merge object into non-object value at key ${key}`)
+            }
+        }
+
+        if (Array.isArray(rhsValue)) {
+            if (lhsValue === undefined) {
+                result[key] = rhsValue
+            }
+            else if (Array.isArray(lhsValue)) {
+                result[key] = [...(lhsValue as Object[]), ...(rhsValue as Object[])]
+            }
+            else {
+                throw new Error(`Cannot merge array into non-array value at key ${key}`)
+            }
+        }
+
+        else {
+            result[key] = rhsValue
+        }
+
+    }
+
+    return result
+}
 
 const EMPTY = Symbol("empty")
 type Literal = Object | Object[] | string | number | typeof EMPTY
@@ -110,19 +150,76 @@ type Generator = (ctx: Context) => Literal;
 
 interface Context {
     values: Object;
+    identifiers: Map<string, e.Expression>;
+    stack: any[];
 }
 
-function assertUnreachable(_: never): never {
+function assertUnreachable(expr: never): never {
     throw new Error("Didn't expect to get here");
 }
 
 function liftToFn(expr: e.LiftExpression): Generator {
     return (ctx: Context) => {
-        const inner = expressionToFn(expr.expr)(ctx)
+        const inner = expressionToFn(expr.operand)(ctx)
         if (Array.isArray(inner)) {
             return inner
         }
         return [inner]
     }
+}
+
+function applicationToFn(expr: e.ApplicationExpression): Generator {    
+    const id = expr.identifier
     
+    let value : undefined | number | string  = undefined
+    if (/[\d+(.\d+)]/.test(id)) {
+        value = Number(id)      
+    }
+    if (id.startsWith('"') && id.endsWith('"')) {
+        value = id.slice(1, -1)
+    }
+
+    return (ctx: Context) => {
+        if (expr.operand) {
+            expressionToFn(expr.operand)(ctx)
+        }
+
+        if (value !== undefined) {
+            return ctx.stack.push(value)
+        }
+
+        const resolvedExpr = ctx.identifiers.get(expr.identifier)
+
+        if (!resolvedExpr) {
+            throw new Error(`Identifier ${expr.identifier} not found in context`)
+        }
+        
+        const r = expressionToFn(resolvedExpr)(ctx)     
+        ctx.stack.push(r)
+
+        return r
+    }
+}
+
+
+function functionToFn(expr: e.FunctionExpression): Generator {
+    const operandFn = expressionToFn(expr.operand)
+    return (ctx: Context) => {
+        const arg = ctx.stack.pop()
+
+        const fnCtx = cloneContext(ctx)
+        fnCtx.identifiers.set(expr.identifier, e.Scalar(arg))
+
+        const result = operandFn(fnCtx)
+        ctx.stack.push(result)
+        return result
+    }
+}
+
+function cloneContext(ctx: Context): Context {
+    return {
+        values: ctx.values,
+        stack: ctx.stack.slice(),
+        identifiers: new Map(ctx.identifiers),
+    }
 }

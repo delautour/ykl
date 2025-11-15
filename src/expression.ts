@@ -1,92 +1,93 @@
 
 import { Cardinality } from './type_system.ts'
-import * as l from './lexer.ts'
-import { Stream } from './stream.ts'
 
-export type AssignmentExpression = {
-  type: "Assignment"
-  key: string
-  expr: Expression
-  cardinality: () => Cardinality
-}
-
-export type MergeExpression = {
-  readonly type: "Merge"
-  readonly lhs:  Expression
-  readonly rhs:  Expression
+interface BaseExpression {
+  readonly type: string
   readonly cardinality: () => Cardinality
 }
 
-export type YieldExpression = {
-  readonly type: "Yield"
-  readonly inner: Expression
-  readonly cardinality: () => Cardinality
+interface TerminalExpression extends BaseExpression { }
+
+interface UnaryExpression extends BaseExpression {
+  operand: Expression
 }
 
-export type LiftExpression = {
+interface BinaryExpression extends BaseExpression {
+  lhs: Expression
+  rhs: Expression
+}
+
+export interface UnitExpression extends TerminalExpression {
+  readonly type: "Unit"
+}
+
+export interface ScalarExpression extends TerminalExpression {
+  readonly type: "Scalar"
+  readonly value: any
+}
+
+export interface VectorExpression extends TerminalExpression {
+  readonly type: "Vector"
+  readonly value: any
+}
+
+export class AssignmentExpression implements UnaryExpression {
+  public readonly type = "Assignment"
+  readonly key: string
+
+  private _operand: Expression
+  constructor(key: string, operand?: Expression) {
+    this.key = key
+    this._operand = operand
+  }
+
+  public get operand() {
+    return this._operand
+  }
+
+  public setOperand(operand: Expression) {
+    this._operand = operand
+  }
+
+  public get cardinality() {
+    return this.operand.cardinality()
+  }
+}
+
+export class FunctionExpression implements UnaryExpression {
+  cardinality = () => Cardinality.Unknown
+  readonly type = "Function"
+  readonly identifier: string
+  operand: Expression
+
+  constructor(identifier: string, operand?: Expression) {
+    this.identifier = identifier
+    this.operand = operand
+  }
+}
+
+export interface LiftExpression extends UnaryExpression {
   readonly type: "Lift"
-  readonly expr: Expression
-  readonly cardinality: () => Cardinality
 }
 
-export type NumberExpression = ReturnType<typeof Number>
-export type StringExpression = ReturnType<typeof String>
-export type UnitExpression = ReturnType<typeof Unit>
-export type ScalarExpression = ReturnType<typeof Scalar>
-export type VectorExpression = ReturnType<typeof Vector>
-
-export type Expression = 
-    { type: string, cardinality: () => Cardinality } & (
-    LiftExpression |
-    YieldExpression |
-    AssignmentExpression |
-    NumberExpression |
-    StringExpression |
-    BlockExpression |
-    UnitExpression |
-    MergeExpression |
-    ScalarExpression |
-    VectorExpression
-  )
-
-export function Lift (expr: Expression): LiftExpression {
-    return { 
-      type: "Lift", 
-      expr, 
-      cardinality: () => Cardinality.Vector 
-    } as const
+export interface MergeExpression extends BinaryExpression {
+  readonly type: "Merge"
 }
 
-export function Merge (lhs: Expression, rhs: Expression): MergeExpression {
-    return {
-      type: "Merge",
-      lhs,
-      rhs,
-      cardinality: lhs.cardinality
-    } as const
+export interface YieldExpression extends UnaryExpression {
+  readonly type: "Yield"
 }
 
-export const Number = (value: number) => ({ type: "Number", value, cardinality: () => Cardinality.Scalar } as const)
-export const String = (str: string) => ({ type: "String", str, cardinality: () => Cardinality.Scalar } as const)
-export const Unit = () => ({ type: "Unit", cardinality: () => Cardinality.Unit } as const)
-export const Scalar = ( value ) => ({ type: "Scalar", value, cardinality: () => Cardinality.Scalar } as const)
-export const Vector = ( value ) => ({ type: "Vector", value, cardinality: () => Cardinality.Vector } as const)
-export function Assignment (key: string, expr: Expression): AssignmentExpression {
-    return { 
-      type: "Assignment", 
-      key, 
-      expr,
-      cardinality: expr.cardinality
-     } as const
+export interface ApplicationExpression extends UnaryExpression {
+  readonly type: "Application"
+  readonly identifier: string
 }
 
-export function Yield(inner: Expression): YieldExpression {
-    return { type: "Yield", inner, cardinality: () => Cardinality.Scalar } as const
+export interface PipelineExpression extends BinaryExpression {
+  readonly type: "Pipeline"
 }
 
-export const Block = () => new BlockExpression()
-
-export class BlockExpression {
+export class BlockExpression implements BaseExpression {
   readonly type = "Block"
   readonly sections: Expression[][] = []
 
@@ -103,17 +104,17 @@ export class BlockExpression {
 
   cardinality() {
     if (this.sections.length === 0)
-      return Cardinality.Unit    
+      return Cardinality.Unit
     if (this.sections.length > 1)
       return Cardinality.Vector
-    
+
     const section = this.sections[0]
     const yieldCount = section.filter(e => e.type === "Yield").length
     if (yieldCount <= 1)
       return Cardinality.Scalar
     return Cardinality.Vector
   }
-  
+
   toString() {
     const header = `Block: \n${this.cardinality()}`
 
@@ -125,11 +126,108 @@ export class BlockExpression {
   }
 }
 
+export type Expression =
+  LiftExpression |
+  YieldExpression |
+  AssignmentExpression |
+  BlockExpression |
+  UnitExpression |
+  MergeExpression |
+  ScalarExpression |
+  ApplicationExpression |
+  PipelineExpression |
+  VectorExpression | 
+  FunctionExpression
+
+export const Block = () => new BlockExpression()
+
+export function Unit(): UnitExpression {
+  return { type: "Unit", cardinality: () => Cardinality.Unit } as const
+}
+
+export function Scalar(value: any): ScalarExpression {
+  return { type: "Scalar", value, cardinality: () => Cardinality.Scalar } as const
+}
+
+export function Vector(value: any): VectorExpression {
+  return { type: "Vector", value, cardinality: () => Cardinality.Vector } as const
+}
+
+function Application(identifier: string, operand?: Expression): ApplicationExpression {
+  return {
+    type: "Application",
+    operand,
+    identifier,
+    cardinality:
+      () => Cardinality.Unknown
+  } as const
+}
+
+
+export function Lift(expr: Expression): LiftExpression {
+  return {
+    type: "Lift",
+    operand: expr,
+    cardinality: () => Cardinality.Vector
+  } as const
+}
+
+export function Merge(lhs: Expression, rhs: Expression): Expression {
+  const lhsCard = lhs.cardinality()
+  const rhsCard = rhs.cardinality()
+  if (rhsCard === "Unit") {
+    return lhs
+  }
+
+  if (lhsCard === "Unit") {
+    return rhs
+  }
+
+  if (lhsCard === "Scalar" && rhsCard === "Vector") {
+    throw new Error("Merging of Vector into Scalar is not supported")
+  }
+
+  const merge: MergeExpression = {
+    type: "Merge",
+    lhs,
+    rhs,
+    cardinality: lhs.cardinality
+  }
+
+  return merge
+}
+
+export function Assignment(key: string, expr?: Expression): AssignmentExpression {
+  return new AssignmentExpression(key, expr)
+}
+
+export function Yield(operand: Expression): YieldExpression {
+  return { type: "Yield", operand, cardinality: () => Cardinality.Scalar } as const
+}
+
+/// ----------------------------------------------------------------
+/// Parser
+/// --------------------------------------------------------------------------
+
+import * as l from './lexer.ts'
+import { Stream } from './stream.ts'
+import { parse } from 'path'
+import { resourceLimits } from 'worker_threads'
 
 export function BuildAst(tokens: Stream<l.Token>): BlockExpression {
   tokens.consumeWhile(tkn => tkn.type === "Newline")
-  return parseBlock(tokens)
+  parseBlock(tokens)
+  const block = STACK.pop()
+  if (STACK.length !== 0) {
+    throw new Error("Stack is not empty after parsing block")
+  }
+  if (block.type !== "Block") {
+    throw new Error("Top of stack is not a Block expression")
+  }
+  return block
 }
+
+const STACK: Expression[] = []
 
 function parseBlock(tkns: Stream<l.Token>): BlockExpression {
   let indent = 0
@@ -137,7 +235,7 @@ function parseBlock(tkns: Stream<l.Token>): BlockExpression {
   // We need to look ahead to see if there is any explicit section
 
   const lookAhead = tkns.range()
-  sectionStartLoop: for (let token = lookAhead.peek(); token; token = lookAhead.next()) { 
+  sectionStartLoop: for (let token = lookAhead.peek(); token; token = lookAhead.next()) {
     switch (token.type) {
       case "Indent":
         indent++
@@ -156,6 +254,7 @@ function parseBlock(tkns: Stream<l.Token>): BlockExpression {
     }
   }
   const block = new BlockExpression()
+  STACK.push(block)
 
   while (tkns.hasMore) {
     const token = tkns.next()
@@ -167,27 +266,47 @@ function parseBlock(tkns: Stream<l.Token>): BlockExpression {
         continue
       }
       case "Indent": {
-        const ptr = tkns.position
-        block.pushExr(parseBlock(tkns))
+        parseBlock(tkns)
+        block.pushExr(STACK.pop())
         continue
       }
+      case "EOF":
       case "Outdent": {
         return block
       }
       case "Atom": {
         const nextToken = tkns.peek()
-        
-        if (nextToken && nextToken.type === "LiteralAssignment") {
-          tkns.next() // consume LiteralAssignment
-          block.pushExr(Assignment(token.str, Scalar(nextToken.str)))
+
+        if (!nextToken) {
+          throw new Error("Unexpected end of tokens after Atom")
+        }
+
+        if (token.str === "yield") {
+          if (nextToken.type === "Atom") {
+            parseApplication(tkns)
+            block.pushExr(Yield(STACK.pop()))
+            continue
+          }
+          if (nextToken.type === "Indent") {
+            tkns.next() // consume Indent
+            parseBlock(tkns)
+            block.pushExr(Yield(STACK.pop()))
+            continue
+          }
+
+          throw new Error("Yield must be used as 'yield <expression>'")
+        }
+
+        if (nextToken.type === "LiteralAssignment" || nextToken.type === "ExpressionAssignment") {
+          STACK.push(Assignment(token.str))
+          parseAssignment(tkns)
+          block.pushExr(STACK.pop())
           continue
         }
 
-        if (nextToken && nextToken.type === "ExpressionAssignment") {
-          tkns.backtrack()
-          block.pushExr(parseAssignment(tkns))
-          continue
-        }
+        tkns.backtrack()
+        parseApplication(tkns)
+        block.pushExr(STACK.pop())
 
         break
       }
@@ -196,55 +315,158 @@ function parseBlock(tkns: Stream<l.Token>): BlockExpression {
     }
   }
 
-  return block
+  throw new Error("Expected Outdent")
 }
 
-function parseAssignment(tkns: Stream<l.Token>): Expression {
-  const keyToken = tkns.next()
-  if (keyToken.type !== "Atom") {
-    throw new Error("Expected Atom token for assignment key")
+function parseAssignment(tkns: Stream<l.Token>) {
+  const assignment = STACK[STACK.length - 1]
+  if (assignment.type !== "Assignment") {
+    throw new Error("Top of stack is not an Assignment expression")
   }
 
-  if (tkns.next().type !== "ExpressionAssignment") {
-    throw new Error("Expected Assignment token")
+  const operatorToken = tkns.next()
+
+  if (operatorToken.type === "LiteralAssignment") {
+    return assignment.setOperand(Scalar(operatorToken.str))
   }
 
-  let valueToken = tkns.next()
-  switch (valueToken.type) {
-    case "LiteralAssignment": {
-      tkns.next() // consume Newline
-      return Assignment(keyToken.str, String(valueToken.str))
+  if (operatorToken.type !== "ExpressionAssignment") {
+    throw new Error("Expected assignment operator token")
+  }
+
+  continueExpressionChain(tkns)
+  assignment.setOperand(STACK.pop())
+}
+
+function parseApplication(tkns: Stream<l.Token>) {
+  const atom = tkns.next()
+  if (atom.type !== "Atom") {
+    throw new Error("Expected Atom token at start of application")
+  }
+
+  const next = tkns.peek()
+
+  if (next.type === "Atom") {
+    const application = Application(atom.str)
+    STACK.push(application)
+    parseApplication(tkns)
+    if (STACK[STACK.length - 1].type !== "Function") {
+      const operand = STACK.pop()
+      application.operand = operand
+    }
+    return
+  }
+
+  STACK.push(Application(atom.str))
+
+  continueExpressionChain(tkns)
+
+}
+
+function parseOperator(tkns: Stream<l.Token>): boolean {
+  const operatorToken = tkns.peek()
+  switch (operatorToken.type) {
+    case "Pipeline": {
+      const lhs = unwindUntil("Block", "Assignment")
+
+      return true
     }
 
-    case "Indent": {
-      const ptr = tkns.position
-      // tkns.consume(1) // consume Indent
-      const blockExpr = parseBlock(tkns)
-      return Assignment(keyToken.str, blockExpr)
-    }
+  }
 
+  return false
+}
+
+function continueExpressionChain(tkns: Stream<l.Token>) {
+ const tkn = tkns.peek()
+ const ptr = tkns.position
+
+  switch (tkn.type) {
+    case "Outdent":
+    case "EOF":
+    case "Newline":
+    {
+      return false
+    }
     case "EmptyObject": {
-      return Assignment(keyToken.str, Scalar({}))
+      tkns.consume()
+      STACK.push(Scalar({}))
+      return true
     }
-
     case "EmptyList": {
-      return Assignment(keyToken.str, Vector([]))
+      tkns.consume()
+      STACK.push(Vector([]))
+      return true
     }
-
+    case "Indent": {
+      tkns.consume()
+      parseBlock(tkns)
+      return true
+    }
+    case "Atom": {
+      parseApplication(tkns)
+      return true
+    }
+    case "Fn" : {
+      tkns.consume() // consume operator
+      parseFunctionDefinition(tkns)
+      return true
+    }
+    case "Merge": {
+      tkns.consume() // consume operator
+      const LHS = STACK.pop()      
+      continueExpressionChain(tkns)
+      const RHS = STACK.pop()
+      STACK.push(Merge(LHS, RHS))
+      return true
+    }
     default: {
-      const values = tkns.consumeWhile(tkn => tkn.type !== "Newline")
-
-      const str = values.reduce((acc, token, i) => {
-        if (token.type === "Atom") {
-            return acc + token.str + (i == values.length - 1 ? '' : token.trailingWs)
-          }
-          return acc
-
-      }, '')
-     
-      tkns.next() // consume Newline
-      return Assignment(keyToken.str, String(str))
-    }    
+      throw new Error(`Unexpected token type in expression chain: ${tkn.type}`)
+    }
   }
-  throw new Error("Unrecognized token in assignment value")
+}
+
+function parseFunctionDefinition(tkns: Stream<l.Token>) {
+  const ids = unwindWhile("Application")
+
+  if (ids.length === 0) {
+    warn("Function has no arguments")
+  }
+
+  continueExpressionChain(tkns)
+
+  for (const id of ids) {
+    const rhs = STACK.pop()
+    STACK.push(new FunctionExpression(id.identifier, rhs)) 
+  }
+}
+
+function unwindUntil(...types: Expression["type"][]) {
+  const peek = () => STACK[STACK.length - 1]
+  const result: Expression[] = []
+  let top = peek()
+
+  while (types.indexOf(peek().type) < 0) {
+    top = STACK.pop()
+    result.push(top)
+  }
+
+  return result
+}
+
+function unwindWhile<T extends Expression["type"], U extends Extract<Expression, { type: T }>>(...types: T[]): U[] {
+  const peek = () => STACK[STACK.length - 1]
+  const result: U[] = []
+
+  while (STACK.length > 0 && types.includes(peek().type as T)) {
+    const popped = STACK.pop() as U
+    result.push(popped)
+  }
+
+  return result
+}
+
+
+function warn(msg: string) {
+  console.warn("Warning: " + msg)
 }

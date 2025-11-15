@@ -49,10 +49,10 @@ function renderSection(section: e.Expression[], indentLevel: number) {
 
 function renderAssignment(assignment: e.AssignmentExpression, indentLevel: number): string {
     const indent = INDENT.repeat(indentLevel)
-    if (assignment.expr.type === "Block") {
-        return `${indent}${assignment.key}:` + '\n' + renderBlock(assignment.expr, indentLevel + 1)
+    if (assignment.operand.type === "Block") {
+        return `${indent}${assignment.key}:` + '\n' + renderBlock(assignment.operand, indentLevel + 1)
     }
-    return `${indent}${assignment.key}: ${render(assignment.expr, indentLevel)}\n`
+    return `${indent}${assignment.key}: ${render(assignment.operand, indentLevel)}\n`
 }
 
 function assertUnreachable(_: never): never {

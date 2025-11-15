@@ -14,11 +14,18 @@ export type Token =
     ReturnType<typeof OpenParen> |
     ReturnType<typeof CloseParen> |
     ReturnType<typeof Comment> |
-    ReturnType<typeof Lift>
+    ReturnType<typeof Lift> |
+    ReturnType<typeof Pipeline> |
+    ReturnType<typeof Merge> | 
+    ReturnType<typeof EOF> |
+    ReturnType<typeof Fn>
 
 const ExpressionAssignment = unitToken("ExpressionAssignment")
 
-const Lift = unitToken("^")
+const EOF = unitToken("EOF")
+const Lift = unitToken("Lift")
+const Pipeline = unitToken("Pipeline")
+const Merge = unitToken("Merge")
 const Newline = (indent: number) => ({  type: "Newline",  indent} as const)
 const Indent = unitToken("Indent")
 const Outdent = unitToken("Outdent")
@@ -27,14 +34,13 @@ const Comment = unitToken("Comment")
 const LiteralAssignment = (str: string) => ({ type: "LiteralAssignment", str } as const)
 const Atom = (str: string, trailingWs: string) => ({ type: "Atom", str, trailingWs } as const)
 
-
 const SectionStart = unitToken("SectionStart")
 const OpenParen = unitToken("OpenParen")
 const CloseParen = unitToken("CloseParen")
-const Unit = unitToken("Unit")
 const EmptyObject = unitToken("EmptyObject")
 const EmptyList = unitToken("EmptyList")
 const Unknown = (str: string) =>  ({  type: "Unknown",  str } as const)
+const Fn = unitToken("Fn")
 
 function unitToken<T extends string>(type: T) {
     return () => ({ type } as const)
@@ -101,6 +107,10 @@ export function getTokens(fileContent: string) {
     i = newIndex
     if (token) {
       if (token.type === "Newline") {
+        while (token.indent < indents[indents.length - 1]) {
+          indents.pop()
+          tokens.push(Outdent())
+        }
         const lastToken = tokens[tokens.length - 1]
         if (lastToken && ((lastToken.type === "Newline" && lastToken.indent === token.indent) || lastToken.type === "Indent" || lastToken.type === "Outdent")) {
           // skip redundant newlines
@@ -116,10 +126,6 @@ export function getTokens(fileContent: string) {
           tokens.push(Indent())
         }
 
-        while (token.indent < indents[indents.length - 1]) {
-          indents.pop()
-          tokens.push(Outdent())
-        }
       } else {
         tokens.push(token)
       }
@@ -134,6 +140,7 @@ export function getTokens(fileContent: string) {
   for (const e of errors) {
     console.log(e)
   }
+  tokens.push(EOF())
   return tokens
 }
 
@@ -145,10 +152,13 @@ function getToken(src: string, index: number): TokenResult {
     symbol("(", OpenParen),
     symbol(")", CloseParen),
     symbol("{}", EmptyObject),
-    symbol("*", Lift),
+    symbol("->", Fn),
+    symbol("^", Lift),
+    symbol("|", Pipeline),
+    symbol("+", Merge),
     symbol("[]", EmptyList),
-    literalAssignment,
     symbol(":=", ExpressionAssignment),
+    literalAssignment,
     symbol(":", ExpressionAssignment),
     
     symbol("---", SectionStart),
@@ -207,7 +217,6 @@ function literalAssignment(src: string, index: number): TokenResult {
     return quotedLiteral(src, i + 1)
 
   return unquotedLiteral(src, i)
-  
 }
 
 function quotedLiteral(src: string, index: number): TokenResult {

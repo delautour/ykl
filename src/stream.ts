@@ -59,12 +59,12 @@ export class Stream<T extends {type: string}> {
         return result
     }
 
-    consume(index) {
-        if (index < 0) {
+    consume(count: number = 1) {
+        if (count < 0) {
             throw new Error("Can only advance by a positive index")
         }
-        const items = this.items.slice(this.pointer, this.pointer + index)
-        this.pointer += index
+        const items = this.items.slice(this.pointer, this.pointer + count)
+        this.pointer += count
         return items
     }
 
