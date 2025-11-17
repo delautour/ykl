@@ -72,6 +72,7 @@ export interface LiftExpression extends UnaryExpression {
 
 export interface MergeExpression extends BinaryExpression {
   readonly type: "Merge"
+  readonly mergeType: "Hard" | "Soft"
 }
 
 export interface YieldExpression extends UnaryExpression {
@@ -172,7 +173,7 @@ export function Lift(expr: Expression): LiftExpression {
   } as const
 }
 
-export function Merge(lhs: Expression, rhs: Expression): Expression {
+export function Merge(lhs: Expression, rhs: Expression, mergeType: "Hard" | "Soft" = "Hard"): Expression {
   const lhsCard = lhs.cardinality()
   const rhsCard = rhs.cardinality()
   if (rhsCard === "Unit") {
@@ -191,6 +192,7 @@ export function Merge(lhs: Expression, rhs: Expression): Expression {
     type: "Merge",
     lhs,
     rhs,
+    mergeType,
     cardinality: lhs.cardinality
   }
 
@@ -211,11 +213,8 @@ export function Yield(operand: Expression): YieldExpression {
 
 import * as l from './lexer.ts'
 import { Stream } from './stream.ts'
-import { parse } from 'path'
-import { resourceLimits } from 'worker_threads'
 
 export function BuildAst(tokens: Stream<l.Token>): BlockExpression {
-  tokens.consumeWhile(tkn => tkn.type === "Newline")
   parseBlock(tokens)
   const block = STACK.pop()
   if (STACK.length !== 0) {
@@ -297,9 +296,14 @@ function parseBlock(tkns: Stream<l.Token>): BlockExpression {
           throw new Error("Yield must be used as 'yield <expression>'")
         }
 
-        if (nextToken.type === "LiteralAssignment" || nextToken.type === "ExpressionAssignment") {
-          STACK.push(Assignment(token.str))
-          parseAssignment(tkns)
+        if (nextToken.type === "Assignment") {
+          tkns.next() // consume Assignment
+          const assignment= Assignment(token.str)
+          
+          STACK.push(assignment)
+          expressionChain(tkns)
+          assignment.setOperand(STACK.pop())
+          
           block.pushExr(STACK.pop())
           continue
         }
@@ -316,26 +320,6 @@ function parseBlock(tkns: Stream<l.Token>): BlockExpression {
   }
 
   throw new Error("Expected Outdent")
-}
-
-function parseAssignment(tkns: Stream<l.Token>) {
-  const assignment = STACK[STACK.length - 1]
-  if (assignment.type !== "Assignment") {
-    throw new Error("Top of stack is not an Assignment expression")
-  }
-
-  const operatorToken = tkns.next()
-
-  if (operatorToken.type === "LiteralAssignment") {
-    return assignment.setOperand(Scalar(operatorToken.str))
-  }
-
-  if (operatorToken.type !== "ExpressionAssignment") {
-    throw new Error("Expected assignment operator token")
-  }
-
-  continueExpressionChain(tkns)
-  assignment.setOperand(STACK.pop())
 }
 
 function parseApplication(tkns: Stream<l.Token>) {
@@ -359,7 +343,7 @@ function parseApplication(tkns: Stream<l.Token>) {
 
   STACK.push(Application(atom.str))
 
-  continueExpressionChain(tkns)
+  expressionChain(tkns)
 
 }
 
@@ -377,7 +361,7 @@ function parseOperator(tkns: Stream<l.Token>): boolean {
   return false
 }
 
-function continueExpressionChain(tkns: Stream<l.Token>) {
+function expressionChain(tkns: Stream<l.Token>) {
  const tkn = tkns.peek()
  const ptr = tkns.position
 
@@ -398,6 +382,16 @@ function continueExpressionChain(tkns: Stream<l.Token>) {
       STACK.push(Vector([]))
       return true
     }
+    case "LiteralString": {
+      tkns.consume()
+      STACK.push(Scalar(tkn.str))
+      return true
+    }
+    case "LiteralNumber": {
+      tkns.consume()
+      STACK.push(Scalar(tkn.num))
+      return true
+    }
     case "Indent": {
       tkns.consume()
       parseBlock(tkns)
@@ -412,14 +406,16 @@ function continueExpressionChain(tkns: Stream<l.Token>) {
       parseFunctionDefinition(tkns)
       return true
     }
-    case "Merge": {
+    case "SoftMerge":
+    case "HardMerge": {
       tkns.consume() // consume operator
       const LHS = STACK.pop()      
-      continueExpressionChain(tkns)
+      expressionChain(tkns)
       const RHS = STACK.pop()
-      STACK.push(Merge(LHS, RHS))
+      STACK.push(Merge(LHS, RHS, tkn.type === "HardMerge" ? "Hard" : "Soft"))
       return true
     }
+
     default: {
       throw new Error(`Unexpected token type in expression chain: ${tkn.type}`)
     }
@@ -433,7 +429,7 @@ function parseFunctionDefinition(tkns: Stream<l.Token>) {
     warn("Function has no arguments")
   }
 
-  continueExpressionChain(tkns)
+  expressionChain(tkns)
 
   for (const id of ids) {
     const rhs = STACK.pop()

@@ -107,11 +107,19 @@ function mergeToFn(expr: e.MergeExpression): Generator {
 }
 
 function deepMerge(lhs: Object, rhs: Object): Object {
+    if (lhs === undefined) {
+        return rhs
+    }
+    if (rhs === undefined) {
+        return lhs
+    }
     const result: Object = {...lhs}
+    
     for (const [key, rhsValue] of Object.entries(rhs)) {
         const lhsValue = lhs[key]
 
         if(typeof rhsValue === 'object') {
+            
             if (lhsValue === undefined) {
                 result[key] = rhsValue
             }
@@ -123,7 +131,7 @@ function deepMerge(lhs: Object, rhs: Object): Object {
             }
         }
 
-        if (Array.isArray(rhsValue)) {
+        else if (Array.isArray(rhsValue)) {
             if (lhsValue === undefined) {
                 result[key] = rhsValue
             }

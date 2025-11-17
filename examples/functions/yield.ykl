@@ -1,11 +1,17 @@
-deployment: #
+deployment:
     apiVersion: v1
     kind: Deployment
+    metadatata: 
+        name: foo
+    spec:
+        podTemplate:
+            containers: []
 
-
-scale:= deployment rep ->
-    deployment +
+scale:= dep rep ->
+    dep +
         spec:
             replicas:= rep
-        
-scale deployment 2
+
+yield scale deployment 3
+yield scale deployment 2
+

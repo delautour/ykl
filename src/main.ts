@@ -8,6 +8,7 @@ import * as l from "./lexer.ts"
 import * as e from "./expression.ts"
 
 import astToFn from "./ast_to_fn.ts"
+import * as YAML from "yaml"
 
 function compile(srcPath: string) {
   const ast = parse(srcPath)
@@ -15,7 +16,7 @@ function compile(srcPath: string) {
   const fn = astToFn(ast)
 
   const res = fn({})
-  console.log(JSON.stringify(res, null, 2))
+  console.log(YAML.stringify(res, null, 2))
 }
 
 function parse(source: string) {

@@ -12,7 +12,7 @@
                 "<node_internals>/**"
             ],
             "program": "${workspaceFolder}\\src\\main.ts",
-            "args": ["${workspaceFolder}\\examples\\functions\\yield.ykl", "-o", "${workspaceFolder}\\out"],
+            "args": ["${workspaceFolder}\\examples\\functions", "-o", "${workspaceFolder}\\out"],
             "outFiles": [
                 "${workspaceFolder}/**/*.js"
             ]
