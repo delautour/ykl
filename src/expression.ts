@@ -273,7 +273,7 @@ function parseBlock(tkns: Stream<l.Token>): BlockExpression {
       case "Outdent": {
         return block
       }
-      case "Atom": {
+      case "Symbol": {
         const nextToken = tkns.peek()
 
         if (!nextToken) {
@@ -281,7 +281,7 @@ function parseBlock(tkns: Stream<l.Token>): BlockExpression {
         }
 
         if (token.str === "yield") {
-          if (nextToken.type === "Atom") {
+          if (nextToken.type === "Symbol") {
             parseApplication(tkns)
             block.pushExr(Yield(STACK.pop()))
             continue
@@ -324,13 +324,13 @@ function parseBlock(tkns: Stream<l.Token>): BlockExpression {
 
 function parseApplication(tkns: Stream<l.Token>) {
   const atom = tkns.next()
-  if (atom.type !== "Atom") {
+  if (atom.type !== "Symbol") {
     throw new Error("Expected Atom token at start of application")
   }
 
   const next = tkns.peek()
 
-  if (next.type === "Atom") {
+  if (next.type === "Symbol") {
     const application = Application(atom.str)
     STACK.push(application)
     parseApplication(tkns)
@@ -382,12 +382,12 @@ function expressionChain(tkns: Stream<l.Token>) {
       STACK.push(Vector([]))
       return true
     }
-    case "LiteralString": {
+    case "String": {
       tkns.consume()
       STACK.push(Scalar(tkn.str))
       return true
     }
-    case "LiteralNumber": {
+    case "Number": {
       tkns.consume()
       STACK.push(Scalar(tkn.num))
       return true
@@ -397,7 +397,7 @@ function expressionChain(tkns: Stream<l.Token>) {
       parseBlock(tkns)
       return true
     }
-    case "Atom": {
+    case "Symbol": {
       parseApplication(tkns)
       return true
     }

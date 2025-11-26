@@ -14,4 +14,3 @@ scale:= dep rep ->
 
 yield scale deployment 3
 yield scale deployment 2
-

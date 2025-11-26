@@ -6,7 +6,7 @@ export type Token =
   ReturnType<typeof Indent> |
   ReturnType<typeof Outdent> |
   ReturnType<typeof Unknown> |
-  ReturnType<typeof Atom> |
+  ReturnType<typeof Symbol> |
   ReturnType<typeof SectionStart> |
   ReturnType<typeof EmptyObject> |
   ReturnType<typeof EmptyList> |
@@ -18,13 +18,19 @@ export type Token =
   ReturnType<typeof HardMerge> |
   ReturnType<typeof EOF> |
   ReturnType<typeof Fn> |
-  ReturnType<typeof LiteralString> |
-  ReturnType<typeof LiteralNumber> | 
-  ReturnType<typeof SoftMerge> | 
-  ReturnType<typeof PatternMatch>
+  ReturnType<typeof StringLit> |
+  ReturnType<typeof NumberLit> |
+  ReturnType<typeof SoftMerge> |
+  ReturnType<typeof PatternMatch> |
+  ReturnType<typeof Accessor> |
+  ReturnType<typeof BoolLit>
 
-const Assignment = unitToken("Assignment")
+/// ----------------------------------------------------------------
+/// Token Constructors
+/// --------------------------------------------------------------------------
 
+const Assignment = (literal: boolean) => ({ type: "Assignment", literal } as const)
+const Accessor = unitToken("Accessor")
 const EOF = unitToken("EOF")
 const Lift = unitToken("Lift")
 const Pipeline = unitToken("Pipeline")
@@ -33,12 +39,13 @@ const SoftMerge = unitToken("SoftMerge")
 const Newline = (indent: number) => ({ type: "Newline", indent } as const)
 const Indent = unitToken("Indent")
 const Outdent = unitToken("Outdent")
-const LiteralString = (str: string) => ({ type: "LiteralString", str } as const)
-const LiteralNumber = (num: number) => ({ type: "LiteralNumber", num } as const)
+const StringLit = (str: string) => ({ type: "String", str } as const)
+const NumberLit = (num: number) => ({ type: "Number", num } as const)
+const BoolLit = (bool: boolean) => ({ type: "Bool", bool } as const)
 const PatternMatch = unitToken("PatternMatch")
 
 const Comment = unitToken("Comment")
-const Atom = (str: string, trailingWs: string) => ({ type: "Atom", str, trailingWs } as const)
+const Symbol = (str: string, trailingWs: string) => ({ type: "Symbol", str, trailingWs } as const)
 
 const SectionStart = unitToken("SectionStart")
 const OpenParen = unitToken("OpenParen")
@@ -78,11 +85,11 @@ export function getTokens(fileContent: string) {
     i++
   }
   while (i < source.length) {
-    let result = getToken(source, i)
+    let result = getToken(source, i, tokens)
     let currentErr = ''
     while (result === false && i < source.length) {
       currentErr += source[++i]
-      result = getToken(source, i)
+      result = getToken(source, i, tokens)
     }
 
     if (currentErr.length > 0) {
@@ -106,7 +113,7 @@ export function getTokens(fileContent: string) {
       continue
     }
 
-    const [token, newIndex] = result
+    const [token] = result
 
     if (result[1] <= i) {
       console.error("No progress made, stopping to avoid infinite loop: ", token)
@@ -117,8 +124,10 @@ export function getTokens(fileContent: string) {
     const nextTokens = Array.isArray(token) ? token : [token]
 
     for (const token of nextTokens) {
-      if (token) {
-        if (token.type === "Newline") {
+      switch (token?.type) {
+        case undefined:
+          break
+        case "Newline":
           while (token.indent < indents[indents.length - 1]) {
             indents.pop()
             tokens.push(Outdent())
@@ -138,9 +147,9 @@ export function getTokens(fileContent: string) {
             tokens.push(Indent())
           }
 
-        } else {
+          break
+        default:
           tokens.push(token)
-        }
       }
     }
   }
@@ -163,29 +172,53 @@ export function getTokens(fileContent: string) {
   return tokens
 }
 
-function getToken(src: string, index: number): TokenResult {
+
+function getToken(src: string, index: number, tkns: Token[]): TokenResult {
   return pipeline(
     newline,
     comment,
-
-    symbol("(", OpenParen),
-    symbol(")", CloseParen),
-    symbol("{}", EmptyObject),
-    symbol("[]", EmptyList),
-    symbol("->", Fn),
-    symbol("^", Lift),
-    symbol("|", Pipeline),
-    symbol("+", HardMerge),
-    symbol("+?", SoftMerge),
-    
-    symbol(":=", Assignment),
-    symbol("?", PatternMatch),
+    atom("(", OpenParen),
+    atom(")", CloseParen),
+    atom("{}", EmptyObject),
+    atom("[]", EmptyList),
+    atom("->", Fn),
+    atom("^", Lift),
+    atom("|", Pipeline),
+    atom("+", HardMerge),
+    atom("+?", SoftMerge),
+    atom("?", PatternMatch),
+    assignments,
+    atom(":", Accessor),
+    atom("---", SectionStart),
     literalAssignment,
-    symbol(":", Assignment),
+    symbol,
+  )(src, consumeWhitespace(src, index), tkns)
+}
 
-    symbol("---", SectionStart),
-    atom,
-  )(src, index)
+
+function assignments(src: string, index: number): TokenResult {
+  const current = src[index]
+  const peek = src[index + 1]
+  if (current !== ':') {
+    return false
+  }
+
+  if (peek === ' ') {
+    const ws = consumeWhitespace(src, index + 2)
+    return [Assignment(true), ws]
+  }
+
+  if (peek === '=') {
+    const ws = consumeWhitespace(src, index + 2)
+    return [Assignment(false), ws]
+  }
+  if (peek === '\n' || peek === '\r') {
+
+    return [Assignment(false), index + 1]
+  }
+
+  return false
+
 }
 
 function comment(src: string, index: number): TokenResult {
@@ -200,7 +233,7 @@ function comment(src: string, index: number): TokenResult {
   return [, i]
 }
 
-function atom(src: string, index: number): TokenResult {
+function symbol(src: string, index: number): TokenResult {
   let i = index
 
   function isNonWordChar(char: string) {
@@ -219,7 +252,7 @@ function atom(src: string, index: number): TokenResult {
   const wsi = consumeWhitespace(src, i)
   const ws = src.slice(i, wsi)
 
-  return [Atom(str, ws), wsi]
+  return [Symbol(str, ws), wsi]
 }
 
 function isDigit(char: string) {
@@ -228,30 +261,25 @@ function isDigit(char: string) {
 
 const QUOTES = new Set(['"', "'"])
 
-function literalAssignment(src: string, index: number): TokenResult {
+function literalAssignment(src: string, index: number, tkns: Token[]): TokenResult {
+  const previousToken = tkns[tkns.length - 1]
+  if (previousToken?.type !== "Assignment" || !previousToken.literal) {
+    return false
+  }
+
   // TODO: handle more complex YAML literal assignments
   let i = index
-  if (src[i] !== ':')
-    return false
-  i = consumeWhitespace(src, i + 1)
-
 
   if (QUOTES.has(src[i])) {
-    const quoted = quotedLiteral(src, i)
+    const quoted = quotedLiteral(src, i + 1)
     if (!quoted) {
       return false
     }
-    const [literalToken, next] = quoted
-    return [[Assignment(), ...lift(literalToken)], next]
+    return quoted
   }
 
   const unquoted = unquotedLiteral(src, i)
-  if (!unquoted) {
-    return false
-  }
-
-
-  return [[Assignment(), ...lift(unquoted[0])], unquoted[1]]
+  return unquoted
 }
 
 function quotedLiteral(src: string, index: number): TokenResult {
@@ -265,11 +293,12 @@ function quotedLiteral(src: string, index: number): TokenResult {
 
   i = consumeWhitespace(src, i + 1)
 
-  return [LiteralString(str), i]
+  return [StringLit(str), i]
 }
 
 
 function unquotedLiteral(src: string, index: number): TokenResult {
+
   const terminalChars = new Set(['\n', '\r', "#"])
   let i = index
   let lastNonWhitespace = i
@@ -292,7 +321,19 @@ function unquotedLiteral(src: string, index: number): TokenResult {
 
   const str = src.slice(index, lastNonWhitespace)
 
-  return [LiteralString(str), i]
+
+  if (/^-?\d+(\.\d+)?$/.test(str)) {
+    return [NumberLit(Number(str)), i]
+  }
+
+  if (/^(true)$/i.test(str)) {
+    return [BoolLit(true), i]
+  }
+  if (/^(false)$/i.test(str)) {
+    return [BoolLit(false), i]
+  }
+
+  return [StringLit(str), i]
 }
 
 
@@ -317,9 +358,9 @@ function isWhitespace(char: Char): boolean {
 }
 
 function pipeline(...fns: LexingFn[]): LexingFn {
-  return (src, index) => {
+  return (src, index, tkns) => {
     for (const fn of fns) {
-      const result = fn(src, index)
+      const result = fn(src, index, tkns)
       if (result) {
         return result
       }
@@ -332,20 +373,9 @@ type Char = string
 
 type TokenResult = [Token | Token[], number] | false
 
-type LexingFn = (src: string, index: number) => TokenResult
+type LexingFn = (src: string, index: number, tkns: Token[]) => TokenResult
 
-function assignment(src: string, index: number): TokenResult {
-  let char = src[index];
-
-  if (char === ':') {
-    return [Assignment(), consumeWhitespace(src, index + 1)]
-  }
-
-  return false
-
-}
-
-function symbol(match: string, fn: () => Token): LexingFn {
+function atom(match: string, fn: () => Token): LexingFn {
   return (src: string, index: number): TokenResult => {
     if (!src.startsWith(match, index)) {
       return false
@@ -366,8 +396,8 @@ function consumeWhitespace(src: string, index: number): number {
 
 function lift<T>(obj: T | T[]): T[] {
 
-    if (Array.isArray(obj)) {
-        return obj
-    }
-    return [obj]
+  if (Array.isArray(obj)) {
+    return obj
+  }
+  return [obj]
 }

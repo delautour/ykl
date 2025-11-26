@@ -7,7 +7,21 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "Launch Program",
+            "name": "Simple",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "program": "${workspaceFolder}\\src\\main.ts",
+            "args": ["${workspaceFolder}\\examples\\simple", "-o", "${workspaceFolder}\\out"],
+            "outFiles": [
+                "${workspaceFolder}/**/*.js"
+            ]
+        },
+
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Functions",
             "skipFiles": [
                 "<node_internals>/**"
             ],

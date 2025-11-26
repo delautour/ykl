@@ -16,7 +16,7 @@ function compile(srcPath: string) {
   const fn = astToFn(ast)
 
   const res = fn({})
-  console.log(YAML.stringify(res, null, 2))
+  console.log(YAML.stringify(res, null, { aliasDuplicateObjects: false }))
 }
 
 function parse(source: string) {
@@ -42,10 +42,18 @@ function parseDir(dirPath: string) {
 }
 
 function parseFile(filePath: string) {
+  if (filePath.endsWith(".yml") || filePath.endsWith(".yaml")){
+    const fileContent = fs.readFileSync(filePath, "utf-8")
+    const data = YAML.parseAllDocuments(fileContent)
+    const content = data.map(doc => doc.toJS())
+    return e.Vector(content)
+  }
+
   const fileContent = fs.readFileSync(filePath, "utf-8")
   const tokens: l.Token[] = l.getTokens(fileContent)
   return e.BuildAst(new Stream(tokens))
 }
+
 
 program
   .argument("<source>")

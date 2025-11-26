@@ -1,123 +1,255 @@
 import { describe, it, expect, test } from "vitest"
 import { getTokens } from "./lexer"
 
-import * as t from "./lexer"
+describe("Lexer", () => {
+
+    test("Empty source", () => {
+        const input = ``
+        const tokens = getTokens(input)
+        expect(tokens).toEqual([{ type: "EOF" }])
+    })
+
+    test("Single Atom", () => {
+        const input = `hello`
+        const tokens = getTokens(input)
+        expect(tokens).toContainTokens(
+            { type: "Symbol", str: "hello" },
+            "EOF"
+        )
+    })
+
+    test("Symbol with trailing whitespace", () => {
+        const input = `hello   `
+        const tokens = getTokens(input)
+        expect(tokens).toContainTokens(
+            { type: "Symbol", str: "hello", trailingWs: "   " },
+            "EOF"
+        )
+    })
+
+    test("Function definition", () => {
+        const input = `
+fn:= arg ->
+  arg`
+        const tokens = getTokens(input)
+        expect(tokens).toContainTokens(
+            "Symbol",
+            "Fn",
+            "Indent"
+        )
+    })
 
 
-test("Lexer: Empty input", () => {
-    const input = ``
-    const tokens = getTokens(input)
-    expect(tokens).toEqual([{ type: "EOF" }])
-})
+    test("Accessor", () => {
+        const input = `key:subkey`
+        const tokens = getTokens(input)
+        expect(tokens).toContainTokens(
+            { type: "Symbol", str: "key" },
+            "Accessor",
+            { type: "Symbol", str: "subkey" },
+            "EOF"
+        )
+    })
 
-test("Lexer: Single Atom", () => {
-    const input = `hello`
-    const tokens = getTokens(input)
-    expect(tokens).toEqual([{ type: "Atom", str: "hello", trailingWs: "" }, { type: "EOF" }])
-})
 
-test("Lexer: Atom with trailing whitespace", () => {
-    const input = `hello   `
-    const tokens = getTokens(input)
-    expect(tokens).toEqual([{ type: "Atom", str: "hello", trailingWs: "   " }, { type: "EOF" }])
-})
+    describe("Assignment", () => {
+        
+        describe("Simple", () => {
+            test("Empty Array", () => {
+                const input = `key: []`
+                const tokens = getTokens(input)
+                expect(tokens).toContainTokens(
+                    "Assignment",
+                    "EmptyList",
+                    "EOF"
+                )
+            })
 
-describe("Lexer: Assignment", () => {
-    describe("LiteralAssignment", () => {
-        test("String Literal", () => {
-            const input = `key: "value"`
-            const tokens = getTokens(input)
-            expect(tokens).toContainTokens (
-                "Assignment",
-                { type: "LiteralString", str: "value" },
-                "EOF"
-            )
-        })
+            test("Empty Object", () => {
+                const input = `key: {}`
+                const tokens = getTokens(input)
+                expect(tokens).toContainTokens(
+                    "Assignment",
+                    "EmptyObject",
+                    "EOF"
+                )
+            })
 
-        test("Empty Array", () => {
-            const input = `key: []`
-            const tokens = getTokens(input)
-            expect(tokens).toContainTokens (
-                "Assignment",
-                "EmptyList",
-                "EOF"
-            )
-        })
+            describe("Numbers", () => {
+                test("Integer", () => {
+                    const input = `key: 1234`
+                    const tokens = getTokens(input) 
+                    expect(tokens).toContainTokens(
+                        "Assignment",
+                        { type: "Number", num: 1234 },
+                    )
+                })
+                
+                test("Negative Int", () => {
+                    const input = `key: -56`
+                    const tokens = getTokens(input) 
+                    expect(tokens).toContainTokens(
+                        "Assignment",
+                        { type: "Number", num: -56 },
+                    )
+                })
 
-        test ("Empty Object", () => {
-            const input = `key: {}`
-            const tokens = getTokens(input)
-            expect(tokens).toContainTokens (
-                "Assignment",
-                "EmptyObject",
-                "EOF"
-            )
-        })
+                test("Decimal", () => {
+                    const input = `key: 3.14159`
+                    const tokens = getTokens(input) 
+                    expect(tokens).toContainTokens(
+                        "Assignment",
+                        { type: "Number", num: 3.14159 },
+                    )
+                })
+            })
 
-        test("Two Words", () => {
-            const input = `key: hello world`
-            const tokens = getTokens(input)
-            expect(tokens).toContainTokens (
-                { type: "Atom", str: "key" },
-                "Assignment",
-                { type: "LiteralString", str: "hello world" },
-                "EOF"
-            )
-        })
+            describe("Booleans", () => {
+                test("true", () => {
+                    const input = `key: true`
+                    const tokens = getTokens(input) 
+                    expect(tokens).toContainTokens(
+                        "Assignment",
+                        { type: "Bool", bool: true },
+                    )
+                })
+                test("True", () => {
+                    const input = `key: True`
+                    const tokens = getTokens(input) 
+                    expect(tokens).toContainTokens(
+                        "Assignment",
+                        { type: "Bool", bool: true },
+                    )
+                })
 
-        test("One word", () => {
-            const input = `key: hello`
-            const tokens = getTokens(input)
-            expect(tokens).toContainTokens (
-                { type: "Atom", str: "key" },
-                "Assignment",
-                { type: "LiteralString", str: "hello" },
-                "EOF"
-            )
-        })
+                test("false", () => {
+                    const input = `key: false`
+                    const tokens = getTokens(input) 
+                    expect(tokens).toContainTokens(
+                        { type: "Bool", bool: false },
+                    )
+                })
+                test("False", () => {
+                    const input = `key: False`
+                    const tokens = getTokens(input) 
+                    expect(tokens).toContainTokens(
+                        { type: "Bool", bool: false },
+                    )
+                })
+            })
 
-        test("Newline and Indentation", () => {
-            const input = `
+            describe("Strings", () => {
+                test("Quoted", () => {
+                    const input = `key: "value"`
+                    const tokens = getTokens(input)
+                    expect(tokens).toContainTokens(
+                        "Assignment",
+                        { type: "String", str: "value" },
+                    )
+                })
+
+
+                test("Two Words", () => {
+                    const input = `key: hello world`
+                    const tokens = getTokens(input)
+                    expect(tokens).toContainTokens(
+                        { type: "Symbol", str: "key" },
+                        "Assignment",
+                        { type: "String", str: "hello world" },
+                    )
+                })
+
+                test("One word", () => {
+                    const input = `key: hello`
+                    const tokens = getTokens(input)
+                    expect(tokens).toContainTokens(
+                        { type: "Symbol", str: "key" },
+                        "Assignment",
+                        { type: "String", str: "hello" },
+                    )
+                })
+
+                test("Trailing whitespace", () => {
+                    const input = `key: hello   `
+                    const tokens = getTokens(input)
+                    expect(tokens).toContainTokens(
+                        { type: "String", str: "hello" },
+                    )
+                })
+
+                test("Inline comment", () => {
+                    const input = `key: hello # this is a comment`
+                    const tokens = getTokens(input)
+                    expect(tokens).toContainTokens(
+                        { type: "String", str: "hello" },
+                    )
+                })
+            })
+
+            test("Block", () => {
+                const input = `
 key:
     bob
     `
-            const tokens = getTokens(input)
-            expect(tokens).toContainTokens(  
+                const tokens = getTokens(input)
+                expect(tokens).toContainTokens(
                     "Assignment",
                     "Indent",
-                    "Atom",
+                    "Symbol",
                     "Newline"
-                    
-            )
+                )
+            })
+        })
+
+        describe("Resolved", () => {
+            test("Single symbol", () => {
+                const input = `key:= value`
+                const tokens = getTokens(input)
+                expect(tokens).toContainTokens(
+                    "Assignment",
+                    { type: "Symbol", str: "value" },
+                )
+            })
+
+            test("Multiple symbols", () => {
+                const input = `key:= value1 value2`
+                const tokens = getTokens(input)
+                expect(tokens).toContainTokens(
+                    "Assignment",
+                    { type: "Symbol", str: "value1" },
+                    { type: "Symbol", str: "value2" },
+                )
+            })
         })
     })
 
     describe("Outdent", () => {
-        test("Before Expression", () => {
+            test("Before Expression", () => {
 
-            const input = `
+                const input = `
 key:
     nestedKey: nestedValue
 anotherKey: anotherValue
 `
-            const tokens = getTokens(input)
-   
-            expect(tokens).toContainTokens(
-                "LiteralString",
-                "Outdent",
-                "Atom"
-            )
-        })
+                const tokens = getTokens(input)
 
-        test("Before EOF", () => {
+                expect(tokens).toContainTokens(
+                    "String",
+                    "Outdent",
+                    "Symbol"
+                )
+            })
 
-            const input = `
+            test("Before EOF", () => {
+
+                const input = `
 key:
     nestedKey: nestedValue
     `
-            const tokens = getTokens(input)
-            expect(tokens).toContainTokens("Outdent", "EOF")
+                const tokens = getTokens(input)
+                expect(tokens).toContainTokens("Outdent", "EOF")
+            })
         })
-    })
+
 })
 
