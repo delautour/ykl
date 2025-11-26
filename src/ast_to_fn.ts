@@ -32,6 +32,8 @@ function expressionToFn(expr: e.Expression): Generator {
             return applicationToFn(expr)
         case "Function":
             return functionToFn(expr)
+        case "Pipeline":
+            throw new Error("Pipelines are not yet supported")
 
         default: 
             return assertUnreachable(expr)   

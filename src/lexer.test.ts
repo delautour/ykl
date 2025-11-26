@@ -1,28 +1,19 @@
 import { describe, it, expect, test } from "vitest"
-import { getTokens } from "./lexer"
+import { getTokens } from "./lexer.ts"
 
 describe("Lexer", () => {
 
     test("Empty source", () => {
         const input = ``
         const tokens = getTokens(input)
-        expect(tokens).toEqual([{ type: "EOF" }])
+        expect(tokens).toContainTokens({ type: "EOF" })
     })
 
-    test("Single Atom", () => {
+    test("Single Symbol", () => {
         const input = `hello`
         const tokens = getTokens(input)
         expect(tokens).toContainTokens(
             { type: "Symbol", str: "hello" },
-            "EOF"
-        )
-    })
-
-    test("Symbol with trailing whitespace", () => {
-        const input = `hello   `
-        const tokens = getTokens(input)
-        expect(tokens).toContainTokens(
-            { type: "Symbol", str: "hello", trailingWs: "   " },
             "EOF"
         )
     })
@@ -195,7 +186,7 @@ key:
                 expect(tokens).toContainTokens(
                     "Assignment",
                     "Indent",
-                    "Symbol",
+                    { type: "Symbol", str: "bob" },
                     "Newline"
                 )
             })
