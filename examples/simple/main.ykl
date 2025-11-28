@@ -1,4 +1,9 @@
+_name: My App
 ---
+apiVersion: v1
+kind: Deployment
+metadata:
+  name:= _name
 spec:
   replicas: 3
   podTemplate:
@@ -11,6 +16,6 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata: # the new line here starts a new block
-  name: 3mel service account
+  name:= _name
   namespace: foo
 spec: {}

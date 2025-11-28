@@ -229,29 +229,6 @@ export function BuildAst(tokens: Stream<l.Token>): BlockExpression {
 const STACK: Expression[] = []
 
 function parseBlock(tkns: Stream<l.Token>): BlockExpression {
-  let indent = 0
-
-  // We need to look ahead to see if there is any explicit section
-
-  const lookAhead = tkns.range()
-  sectionStartLoop: for (let token = lookAhead.peek(); token; token = lookAhead.next()) {
-    switch (token.type) {
-      case "Indent":
-        indent++
-        break
-      case "Outdent":
-        indent--
-        if (indent < 0) {
-          break sectionStartLoop
-        }
-        break
-      case "SectionStart":
-        if (indent === 0) {
-          tkns.consume(lookAhead.position)
-          break sectionStartLoop
-        }
-    }
-  }
   const block = new BlockExpression()
   STACK.push(block)
 

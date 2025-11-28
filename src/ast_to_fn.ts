@@ -48,9 +48,16 @@ function blockToFn(block: e.BlockExpression): Generator {
     }
 
     return (ctx: Context) => {
+        const frontmatterResult = sectionsFns[0](ctx)
+        
+        const c = cloneContext(ctx)
+        for (const [key, value] of Object.entries(frontmatterResult)) {
+            c.identifiers.set(key, e.Scalar(value))
+        }
+        
         const results: Literal[] = []
-        for (const sectionFn of sectionsFns) {
-            const result =  sectionFn(ctx)
+        for (const sectionFn of sectionsFns.slice(1)) {
+            const result =  sectionFn(c)
             results.push(result)
         }
         return results

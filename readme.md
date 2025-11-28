@@ -98,6 +98,10 @@ Sections contain 1 or more expressions (Sections with no expressions are an erro
 
 The results of all sections are concatinated together to form the result. If the length of the result is `0`, then `Unit` is returned, for length `1` a `Scalar` is returned and otherwise a `Vector` is returned.
 
+### Front-matter
+
+Syntax in front-matter is the same as any other block, however the behaivour is altered. Any assignments made will be available within sections, and will not be yielded from the block.
+
 ### How does `-` work**
 
 `-` can be used as the first character in a line to signal indent/outdent behaviour, the indent level will be set to the column of the first non white space character following it, and the following content parsed as a block.
@@ -186,7 +190,7 @@ apiVersion: v1
 metadata:
   name:= _name
 spec:
-  selector: |+
+  selector:
     matchLables:= _appLabels
 ```
 
