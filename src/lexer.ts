@@ -29,11 +29,13 @@ export type Token =
   SoftMerge |
   PatternMatch |
   Accessor |
-  BoolLit
+  BoolLit | 
+  Hyphen
 
 
 type Assignment = TokenBase & { type: "Assignment", literal: boolean }
 type Newline = TokenBase & { type: "Newline", indent: number }
+type Hyphen = TokenBase & { type: "Hyphen", indent: number, column: number }
 type StringLit = TokenBase & { type: "String", str: string }
 type NumberLit = TokenBase & { type: "Number", num: number }
 type BoolLit = TokenBase & { type: "Bool", bool: boolean }
@@ -58,12 +60,14 @@ type EmptyObject = TokenBase & { type: "EmptyObject" }
 type EmptyList = TokenBase & { type: "EmptyList" }
 type Fn = TokenBase & { type: "Fn" }
 
+
 /// ----------------------------------------------------------------
 /// Token Constructors
 /// --------------------------------------------------------------------------
 
 const Assignment = (literal: boolean, start: number, end: number ) => ({ type: "Assignment", literal, start, end } as const)
 const Newline = (indent: number, start: number, end: number ) => ({ type: "Newline", indent, start, end } as const)
+const Hyphen = (indent: number, column: number, start: number, end: number ) => ({ type: "Hyphen", indent, column , start, end } as const)
 const StringLit = (str: string, start: number, end: number) => ({ type: "String", str, start, end } as const)
 const NumberLit = (num: number, start: number, end: number) => ({ type: "Number", num, start, end } as const)
 const BoolLit = (bool: boolean, start: number, end: number) => ({ type: "Bool", bool, start, end } as const)
@@ -112,8 +116,10 @@ export function getTokens(fileContent: string) {
   const errors = []
 
   let i = 0
+  let lineNumber = 1
   const indents: number[] = [0]
   while (i < source.length && source[i] === '\n') {
+    lineNumber++
     i++
   }
   while (i < source.length) {
@@ -148,7 +154,26 @@ export function getTokens(fileContent: string) {
           throw new Error('Undefined token type')
         case "Comment":
           break
+        case "Hyphen":
+          if (token.column !== indents.at(-1) && token.column !== indents.at(-1) + .5) {
+            throw "Hyhpen not supported outside of lists yet"
+          }else {
+            if (tokens.at(-1)?.type === "Newline") {
+              // Here we insert a half indent for the new-line, then a full indent for the hyphen
+              // this means that items in lists are indented one level more than the surrounding context
+              // for the surrounding contentx the outdent must be < both the column, and also the half indent because only full spaces can be typed
+              
+              indents.push(token.column - .5)
+              tokens.pop()
+              tokens.push(Indent(token.start, token.end))
+            }
+            indents.push(token.indent)
+            tokens.push(Indent(token.start, token.end))
+          }
+
+          break
         case "Newline":
+          lineNumber++
           while (token.indent < indents[indents.length - 1]) {
             indents.pop()
             tokens.push(Outdent(token.start+1, token.end))
@@ -205,6 +230,8 @@ function getToken(src: string, index: number, tkns: Token[]): TokenResult {
   return pipeline(
     newline,
     comment,
+    atom("---", SectionStart),
+    hyphen,
     atom("(", OpenParen),
     atom(")", CloseParen),
     atom("{}", EmptyObject),
@@ -217,7 +244,7 @@ function getToken(src: string, index: number, tkns: Token[]): TokenResult {
     atom("?", PatternMatch),
     assignments,
     atom(":", Accessor),
-    atom("---", SectionStart),
+    
     literalAssignment,
     symbol,
   )(src, nextIndex, tkns)
@@ -258,11 +285,18 @@ function* comment(src: string, index: number): TokenResult {
   yield Comment(index, i)
 }
 
+
+
 function* symbol(src: string, index: number): TokenResult {
   let i = index
 
   function isNonWordChar(char: string) {
-    return isWhitespace(char) || char === ':' || char === '\n' || char === '\r' ||  char === '(' || char === ')' || char === '#'
+    return isWhitespace(char) || char === ':'     || 
+    char === '\n' || char === '\r' || 
+     char === '(' || char === ')' || 
+     char === '#'  || char === '{' || char === '}' ||
+     char === '[' || char === ']' || 
+     char === '-' || char === '>' || char === '^' || char === '|' || char === '+' || char === '?' || char === '='
   }
 
   while (i < src.length && !isNonWordChar(src[i])) {
@@ -369,6 +403,26 @@ function* newline(src: string, index: number): Generator<Token> {
   }
   yield Newline(count, index, i)
 }
+
+function* hyphen(src: string, index: number): Generator<Token> {
+  let i = index
+  if (src[i] !== '-') {
+    return
+  }
+
+  while (isWhitespace(src[--i])) {}
+  if (src[i] !== '\n' ){
+    return 
+  }
+
+  const column = index - i - 1
+  i =  index 
+  while (isWhitespace(src[++i])) { }
+  const indent = column + i - index
+
+  yield Hyphen(indent, column, index, i)
+}
+
 
 function isWhitespace(char: Char): boolean {
   return char === ' ' || char === '\t'

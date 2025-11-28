@@ -1,6 +1,5 @@
 import { expect } from "vitest"
-import * as t from "./lexer"
-
+import * as t from "./lexer.ts"
 
 export function toContainTokens(received: t.Token[], ...expected: Array<string | Partial<t.Token>>) {
     
@@ -14,11 +13,7 @@ export function toContainTokens(received: t.Token[], ...expected: Array<string |
             const rT = received[j + k]
             const eT = expected[k]
             const match = tokensMatch(rT, eT)          
-          
-            if (k > 0 && tokensMatch(rT, expected[0])) {
-                i = j + k + 1
-                inc = 0
-            }
+    
          
             if (match) {
                 if (k === expected.length - 1) {

@@ -2,11 +2,22 @@ import { describe, it, expect, test } from "vitest"
 import { getTokens } from "./lexer.ts"
 
 describe("Lexer", () => {
-
     test("Empty source", () => {
         const input = ``
         const tokens = getTokens(input)
         expect(tokens).toContainTokens({ type: "EOF" })
+    })
+
+    test("Section Start", () => {
+        const input = `
+---
+title: My Document
+---
+`
+        const tokens = getTokens(input)
+        expect(tokens).toContainTokens(
+            "SectionStart"
+        )
     })
 
     test("Single Symbol", () => {
@@ -42,9 +53,26 @@ fn:= arg ->
         )
     })
 
+    describe("Comments", () => {
+        test("Single line", () => {
+            const input = `# This is a comment`
+            const tokens = getTokens(input)
+            expect(tokens).not.toContainTokens(
+                "Comment",
+            )
+        })
+
+        test("Inline", () => {
+            const input = `key: value # This is a comment`
+            const tokens = getTokens(input)
+            expect(tokens).toContainTokens(
+                "String",
+                "EOF"
+            )
+        })
+    })
 
     describe("Assignment", () => {
-        
         describe("Simple", () => {
             test("Empty Array", () => {
                 const input = `key: []`
@@ -69,16 +97,16 @@ fn:= arg ->
             describe("Numbers", () => {
                 test("Integer", () => {
                     const input = `key: 1234`
-                    const tokens = getTokens(input) 
+                    const tokens = getTokens(input)
                     expect(tokens).toContainTokens(
                         "Assignment",
                         { type: "Number", num: 1234 },
                     )
                 })
-                
+
                 test("Negative Int", () => {
                     const input = `key: -56`
-                    const tokens = getTokens(input) 
+                    const tokens = getTokens(input)
                     expect(tokens).toContainTokens(
                         "Assignment",
                         { type: "Number", num: -56 },
@@ -87,7 +115,7 @@ fn:= arg ->
 
                 test("Decimal", () => {
                     const input = `key: 3.14159`
-                    const tokens = getTokens(input) 
+                    const tokens = getTokens(input)
                     expect(tokens).toContainTokens(
                         "Assignment",
                         { type: "Number", num: 3.14159 },
@@ -98,7 +126,7 @@ fn:= arg ->
             describe("Booleans", () => {
                 test("true", () => {
                     const input = `key: true`
-                    const tokens = getTokens(input) 
+                    const tokens = getTokens(input)
                     expect(tokens).toContainTokens(
                         "Assignment",
                         { type: "Bool", bool: true },
@@ -106,7 +134,7 @@ fn:= arg ->
                 })
                 test("True", () => {
                     const input = `key: True`
-                    const tokens = getTokens(input) 
+                    const tokens = getTokens(input)
                     expect(tokens).toContainTokens(
                         "Assignment",
                         { type: "Bool", bool: true },
@@ -115,14 +143,14 @@ fn:= arg ->
 
                 test("false", () => {
                     const input = `key: false`
-                    const tokens = getTokens(input) 
+                    const tokens = getTokens(input)
                     expect(tokens).toContainTokens(
                         { type: "Bool", bool: false },
                     )
                 })
                 test("False", () => {
                     const input = `key: False`
-                    const tokens = getTokens(input) 
+                    const tokens = getTokens(input)
                     expect(tokens).toContainTokens(
                         { type: "Bool", bool: false },
                     )
@@ -214,33 +242,144 @@ key:
         })
     })
 
-    describe("Outdent", () => {
-            test("Before Expression", () => {
+    describe("Indent", () => {
+        test("After Assignment", () => {
+            const input = `
+key:
+    nestedKey: nestedValue
+`
+            const tokens = getTokens(input)
+            expect(tokens).toContainTokens(
+                "Assignment",
+                "Indent",
+            )
+        })
 
-                const input = `
+        test ("After hyphen", () => {
+            const input = `
+- item1
+- item2
+`
+            const tokens = getTokens(input)
+            expect(tokens).toContainTokens(
+                "Indent",
+                { type: "Symbol", str: "item1" },
+            )
+            expect(tokens).toContainTokens(
+                "Indent",
+                { type: "Symbol", str: "item2" }
+            )
+        })
+
+        
+        test("Single hyphen in assignment", () => {
+            const input = `
+key:
+- item1`           
+            const tokens = getTokens(input)
+            expect(tokens).toContainTokens(
+                "Assignment",
+                "Indent",
+                "Indent",
+                { type: "Symbol", str: "item1" },
+                "Outdent",
+                "Outdent"
+            )
+        })
+
+        test("Subkeys", () => {
+            const input = `
+key:
+  subkey:
+    - item1: bar
+      foo: bar
+    - item2`           
+            const tokens = getTokens(input)
+            expect(tokens).toContainTokens(
+                "Indent",
+                { type: "Symbol", str: "item1" },
+            )
+            expect(tokens).toContainTokens(
+                "Indent",
+                { type: "Symbol", str: "item2" }
+            )
+        })
+
+     })
+
+    describe("Outdent", () => {
+        test("Before Expression", () => {
+
+            const input = `
 key:
     nestedKey: nestedValue
 anotherKey: anotherValue
 `
-                const tokens = getTokens(input)
+            const tokens = getTokens(input)
 
-                expect(tokens).toContainTokens(
-                    "String",
-                    "Outdent",
-                    "Symbol"
-                )
-            })
+            expect(tokens).toContainTokens(
+                "String",
+                "Outdent",
+                "Symbol"
+            )
+        })
 
-            test("Before EOF", () => {
+        test("Before EOF", () => {
 
-                const input = `
+            const input = `
 key:
     nestedKey: nestedValue
     `
-                const tokens = getTokens(input)
-                expect(tokens).toContainTokens("Outdent", "EOF")
-            })
+            const tokens = getTokens(input)
+            expect(tokens).toContainTokens("Outdent", "EOF")
+        })
+    })
+
+    describe("Operators", () => {
+        test("Lift", () => {
+            const tokens = getTokens(`^value`)
+            expect(tokens).toContainTokens(
+                "Lift",
+                { type: "Symbol", str: "value" },
+                
+            )
         })
 
+        test("Pipeline", () => {
+            const tokens = getTokens(`lhs | rhs`)
+            expect(tokens).toContainTokens(
+                { type: "Symbol", str: "lhs" },
+                "Pipeline",
+                { type: "Symbol", str: "rhs" },
+            )
+        })
+
+        test("Hard merge", () => {
+            const tokens = getTokens(`lhs + rhs`)
+            expect(tokens).toContainTokens(
+                { type: "Symbol", str: "lhs" },
+                "HardMerge",
+                { type: "Symbol", str: "rhs" },
+            )
+        })
+
+        test("Soft merge", () => {
+            const tokens = getTokens(`lhs +? rhs`)
+            expect(tokens).toContainTokens(
+                { type: "Symbol", str: "lhs" },
+                "SoftMerge",
+                { type: "Symbol", str: "rhs" },
+            )
+        })
+
+        test("Pattern match", () => {
+            const tokens = getTokens(`lhs ? rhs`)
+            expect(tokens).toContainTokens(
+                { type: "Symbol", str: "lhs" },
+                "PatternMatch",
+                { type: "Symbol", str: "rhs" },
+            )
+        })
+    })
 })
 

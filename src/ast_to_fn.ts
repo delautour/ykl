@@ -50,7 +50,8 @@ function blockToFn(block: e.BlockExpression): Generator {
     return (ctx: Context) => {
         const results: Literal[] = []
         for (const sectionFn of sectionsFns) {
-            results.push(sectionFn(ctx))
+            const result =  sectionFn(ctx)
+            results.push(result)
         }
         return results
     }
@@ -61,7 +62,7 @@ function sectionToFn(section: e.Expression[]): Generator {
         throw new Error("Empty sections are not supported");
     }
 
-    const yields = section.filter(expr => expr.type === "Yield").map(expressionToFn)
+    const yields = section.filter(expr => expr.type !== "Assignment").map(expressionToFn)
     const assignments = section.filter(expr => expr.type === "Assignment")
     const lastExpr = section[section.length - 1]
     
@@ -80,8 +81,6 @@ function sectionToFn(section: e.Expression[]): Generator {
         if (explicit.length > 0) 
             return explicit
         
-        if (lastExpr.type !== "Assignment") 
-            return expressionToFn(lastExpr)(thisCtx)
         return assignmentsObj
     }
 }

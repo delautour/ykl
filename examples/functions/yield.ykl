@@ -5,12 +5,16 @@ deployment:
         name: foo
     spec:
         podTemplate:
-            containers: []
+            containers:
+              name: app
+              image: app:1.0
+              ---
+              name: sidecar
+              image: istio:25
 
 scale:= dep rep ->
-    dep +
-        spec:
+    dep + spec:
             replicas:= rep
 
-yield scale deployment 3
-yield scale deployment 2
+scale deployment 3
+scale deployment 2
