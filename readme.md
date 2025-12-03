@@ -58,7 +58,7 @@ In YKL we refer to objects being `yielded` from functions rather than returned.
 ## Primitives
 
 Unit
-: This is the value that represents *nothing*. It's impact depends on opperator it is passed to, but the effect is typically to perform no change to the other value.
+: This is the value that represents *nothing*. It's impact depends on operator it is passed to, but the effect is typically to perform no change to the other value.
 
 Struct
 : A unique set of named values. Keys must be strings
@@ -100,7 +100,11 @@ The results of all sections are concatinated together to form the result. If the
 
 ### Front-matter
 
-Syntax in front-matter is the same as any other block, however the behaivour is altered. Any assignments made will be available within sections, and will not be yielded from the block.
+Syntax in front-matter is the same as any other block, however the behaivour is altered. Any assignments made will available as block locals, but *will not* be yielded from the block.
+
+### End-matter
+
+End matter can be used to apply a final transformation to elements yielded from the block. This is a shorthand applying a pipeline operator to the entire block
 
 ### How does `-` work**
 
@@ -111,18 +115,21 @@ Syntax in front-matter is the same as any other block, however the behaivour is 
 #This is the file block
 
 #This is front-matter
+_name: Bob
 ---
 #This is the first section
 - foo: bar # This is a nested block
   meep: mop
 - # Nested blocks can contain sections !!!
-  # This is frontmater
+  frontmatter: yes I am!
   ---
   # This is the first section of the nested block
   5
 ---
 # And this is the last section of the block
 true
+...
+# This is end matter
 <EOF>
 ```
 The resulting of this file will be a vector containing a struct, number, and bool
@@ -173,7 +180,7 @@ Assigment works like YAML
 apiVersion: v1
 ```
 
-to resolve values use `:=`
+to resolve values use `:=`; by doing so tell YKL that the right hand side should be evaluated rather than treated as a string as per normal yaml rules
 
 ```yaml
 _name: my-app
@@ -195,4 +202,93 @@ spec:
 ```
 
 ### Operators
+
+>[!TODO]
+>decide if this is all cases, or to force consistency we only allow in certain cicumstances; or delegate to out of process tool like linter for styles.
+
+Operators can be either infix, or prefix. They are treated as prefix when they immedatily follow another operator, otherwise if they follow a symbol, they are treated as infix. Infix operators have higher precidence than prefix. This allows the combining operator `+` to be used in two ways.
+
+```
++ 5 6
+5 + 6
+```
+
+The intent behind this is to allow natural partial application for use with pipelining, which cannot be achived with infix operators alone. For example:
+
+```yaml
+_double: * 2
+seq: 0..3 | _double
+# seq: [0, 2, 4]
+```
+
+#### $
+
+`$` on it's own represents the *current* object; which is context dependent. Within a block it is the set of assigned properties at the time it is used, for example:
+
+```yaml
+apiVersion: v1
+kind: Example
+
+$ #  { "apiVersion": "v1", "kind": "Example" }
+
+spec: {} # Not included in the properties returned by previous `$`
+```
+
+Within a pipeline it represents the current value within the iteration.
+
+```
+[1, 2, 3] | 10 + $  # [11, 12, 13]
+```
+
+##### Backtracking
+
+>[!TODO]
+>Verify if needed before implementation
+
+`$<int>` will backtrack up the context stack by the specified number of steps. `$0` is equivelant to `$`
+
+##### Variable capture
+
+`$<symbol>` can be used to create function that receives a single argument that will be avaiable to nested expressions under the alias `$<symbol>`.
+
+```
+f:= $metadata
+      apiVersion: v1
+      kind: Something
+      metadata:= $metadata
+
+f name: Bob
+  namespace: default
+```
+
+The primary use is for pipelining where it is prefered to be more expliciti than to use `$` individually
+
+```
+items | $item
+  foo: $item:foo + 10
+  bar: $item:bar
+```
+
+### Pipelining
+
+The pipeline operator `|` operator takes two arguments a (transposer)[https://medium.com/javascript-scene/transducers-efficient-data-processing-pipelines-in-javascript-7985330fe73d] function, and an enumeration target.
+
+Enumeration behaviour:
+
+Unit
+: Unit
+
+Scalar
+: Treated as collection of one object, and the scalar is passed to the transpose function exactly once.
+
+Vector
+: Each item in the vector is passed to the transpose function in order
+
+In this example we pipeline using the `+` (combinining) operator as the transpose function
+
+```
+labels:= | +
+  - _defaultLabels
+  - resource.k8s/specific: bob
+```
 

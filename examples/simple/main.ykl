@@ -1,21 +1,35 @@
-_name: My App
+_name: my-app
+_namespace: default
+_labels: 
+  k8s.io/app:= _name
+_md:
+  metadata:
+    name:= _name
+    namespace:= _namespace
 ---
 apiVersion: v1
 kind: Deployment
-metadata:
-  name:= _name
 spec:
   replicas: 3
   podTemplate:
-    containers:
-      - name: app
-        image: app:1.0
-      - name: sidecar
-        image: istio:25
+    metadata:
+      labels:= _labels
+    spec:
+      containers:
+        - name: app
+          image: app:1.0
+        - name: sidecar
+          image: istio:25
+---
+apiVersion: v1
+kind: Service
+spec:
+  ports:
+    - port: 80
+      targetPort: 8080
+  selector:
+    matchLabels:= _labels
 ---
 apiVersion: v1
 kind: ServiceAccount
-metadata: # the new line here starts a new block
-  name:= _name
-  namespace: foo
 spec: {}
