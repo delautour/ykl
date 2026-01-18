@@ -292,3 +292,16 @@ labels:= | +
   - resource.k8s/specific: bob
 ```
 
+## Type-System
+
+YKL relies on infered types, which are driven from the top most objects. All objects returned from top level blocks must contain two properties
+
+```
+apiVersion: <group>/<version>
+kind: <kind>
+```
+
+if these are not defined, an error is returned. The schema of the object is then hydrated from these properties based on type resolution:
+
+Server
+: A Kubernetes API server is interogated to get the schema of the type

@@ -1,9 +1,13 @@
 
-import { Cardinality } from './type_system.ts'
+import { BooleanType, Cardinality, NumberType, StringType, UnitType, type Type, Unit as UnitTypeInstance, Unresolved, Any, StructType, type AnyType, VectorType } from './type_system.ts'
+
+import { Map, Stack } from 'immutable'
 
 interface BaseExpression {
   readonly type: string
   readonly cardinality: () => Cardinality
+  typeConstraint: Type | undefined
+  dataType: Type | undefined
 }
 
 interface TerminalExpression extends BaseExpression { }
@@ -28,12 +32,47 @@ export interface ScalarExpression extends TerminalExpression {
 
 export interface VectorExpression extends TerminalExpression {
   readonly type: "Vector"
-  readonly value: any
+  readonly inner: Expression[]
+}
+
+export class ScopedExpression implements UnaryExpression {
+  operand: Expression
+  public readonly type = "Scope"
+  readonly symbolTable: Map<string, Expression>
+  typeConstraint: Type | undefined
+  dataType: Type | undefined
+  parent: ScopedExpression
+
+  constructor(table: Map<string, Expression>, parent?: ScopedExpression, operand?: Expression) {
+    this.symbolTable = table
+    this.parent = parent
+    this.operand = operand
+  }
+
+  cardinality() {
+    return this.operand.cardinality()
+  }
+
+  resolve(name: string): Expression | undefined {
+    if (this.symbolTable.has(name)) {
+      return this.symbolTable.get(name)
+    }
+    if (this.parent) {
+      return this.parent.resolve(name)
+    }
+    return undefined
+  }
+
+  toObject() {
+    return {...this.parent?.toObject() || {}, ...this.symbolTable.toObject()}
+  }
 }
 
 export class AssignmentExpression implements UnaryExpression {
   public readonly type = "Assignment"
   readonly key: string
+  typeConstraint: Type | undefined
+  dataType: Type | undefined
 
   private _operand: Expression
   constructor(key: string, operand?: Expression) {
@@ -54,15 +93,17 @@ export class AssignmentExpression implements UnaryExpression {
   }
 }
 
-export class FunctionExpression implements UnaryExpression {
+export class FunctionDefinitionExpression implements BaseExpression {
   cardinality = () => Cardinality.Unknown
   readonly type = "Function"
   readonly identifier: string
-  operand: Expression
+  typeConstraint: Type | undefined
+  dataType: Type | undefined
+  body: Expression
 
-  constructor(identifier: string, operand?: Expression) {
+  constructor(identifier: string, body?: Expression) {
     this.identifier = identifier
-    this.operand = operand
+    this.body = body
   }
 }
 
@@ -84,13 +125,18 @@ export interface ApplicationExpression extends UnaryExpression {
   readonly identifier: string
 }
 
-export interface PipelineExpression extends BinaryExpression {
-  readonly type: "Pipeline"
+export class PipelineExpression implements BaseExpression {
+  cardinality: () => Cardinality
+  typeConstraint: Type
+  dataType: Type
+  readonly type = "Pipeline"
 }
 
 export class BlockExpression implements BaseExpression {
   readonly type = "Block"
   readonly sections: Expression[][] = []
+  typeConstraint: Type | undefined
+  dataType: Type | undefined
 
   startSection() {
     this.sections.push([])
@@ -109,11 +155,19 @@ export class BlockExpression implements BaseExpression {
     if (this.sections.length > 1)
       return Cardinality.Vector
 
-    const section = this.sections[0]
-    const yieldCount = section.filter(e => e.type === "Yield").length
-    if (yieldCount <= 1)
+    if (this.isStruct()) {
       return Cardinality.Scalar
+    } 
+
     return Cardinality.Vector
+  }
+
+  isStruct() {
+    if (this.sections.length !== 1) {
+      return false
+    }
+    const section = this.sections[0]
+    return section.every(e => e.type === "Assignment")
   }
 
   toString() {
@@ -138,20 +192,38 @@ export type Expression =
   ApplicationExpression |
   PipelineExpression |
   VectorExpression | 
-  FunctionExpression
+  FunctionDefinitionExpression |
+  ScopedExpression
 
 export const Block = () => new BlockExpression()
 
 export function Unit(): UnitExpression {
-  return { type: "Unit", cardinality: () => Cardinality.Unit } as const
+  return { 
+    type: "Unit", 
+    cardinality: () => Cardinality.Unit, 
+    typeConstraint: undefined,
+    dataType: UnitTypeInstance
+    } as const
 }
 
-export function Scalar(value: any): ScalarExpression {
-  return { type: "Scalar", value, cardinality: () => Cardinality.Scalar } as const
+export function Scalar(value: any, dataType: StringType | BooleanType | NumberType | UnitType | StructType | AnyType): ScalarExpression {
+  return { 
+    type: "Scalar", 
+    value, cardinality:
+     () => Cardinality.Scalar, 
+     typeConstraint: undefined, 
+     dataType
+    } as const
 }
 
-export function Vector(value: any): VectorExpression {
-  return { type: "Vector", value, cardinality: () => Cardinality.Vector } as const
+export function Vector(inner: Expression[]): VectorExpression {
+  return { 
+    type: "Vector", 
+    inner,
+    cardinality: () => Cardinality.Vector, 
+    typeConstraint: undefined, 
+    dataType: undefined
+  } as const
 }
 
 function Application(identifier: string, operand?: Expression): ApplicationExpression {
@@ -159,17 +231,19 @@ function Application(identifier: string, operand?: Expression): ApplicationExpre
     type: "Application",
     operand,
     identifier,
-    cardinality:
-      () => Cardinality.Unknown
+    cardinality:      () => Cardinality.Unknown,
+    typeConstraint: undefined,
+    dataType: undefined
   } as const
 }
-
 
 export function Lift(expr: Expression): LiftExpression {
   return {
     type: "Lift",
     operand: expr,
-    cardinality: () => Cardinality.Vector
+    cardinality: () => Cardinality.Vector,
+    typeConstraint: undefined,
+    dataType: undefined
   } as const
 }
 
@@ -193,7 +267,9 @@ export function Merge(lhs: Expression, rhs: Expression, mergeType: "Hard" | "Sof
     lhs,
     rhs,
     mergeType,
-    cardinality: lhs.cardinality
+    cardinality: lhs.cardinality,
+    typeConstraint: lhs.typeConstraint,
+    dataType: lhs.dataType
   }
 
   return merge
@@ -204,7 +280,12 @@ export function Assignment(key: string, expr?: Expression): AssignmentExpression
 }
 
 export function Yield(operand: Expression): YieldExpression {
-  return { type: "Yield", operand, cardinality: () => Cardinality.Scalar } as const
+  return { 
+    type: "Yield", 
+    operand, cardinality: () => Cardinality.Scalar, 
+    typeConstraint: undefined,
+    dataType: undefined
+    } as const
 }
 
 /// ----------------------------------------------------------------
@@ -214,23 +295,33 @@ export function Yield(operand: Expression): YieldExpression {
 import * as l from './lexer.ts'
 import { Stream } from './stream.ts'
 
-export function BuildAst(tokens: Stream<l.Token>): BlockExpression {
+export function BuildAst(tokens: Stream<l.Token>): Expression {
+  const scope = new ScopedExpression(Map(), undefined, Unit())
+  STACK.push(scope)
   parseBlock(tokens)
   const block = STACK.pop()
-  if (STACK.length !== 0) {
+  if (STACK.length !== 1) {
     throw new Error("Stack is not empty after parsing block")
   }
   if (block.type !== "Block") {
     throw new Error("Top of stack is not a Block expression")
-  }
-  return block
+  } 
+  scope.operand = block
+  return STACK.pop()
 }
 
-const STACK: Expression[] = []
+type StackFrame = Expression & { }
+const STACK: StackFrame[] = []
+const SCOPE_STACK: Map<string, Expression>[] = []
 
 function parseBlock(tkns: Stream<l.Token>): BlockExpression {
   const block = new BlockExpression()
   STACK.push(block)
+
+  let currentSectionSymbolTable = Map<string, Expression>()
+  let frontMatterSymbolTable: Map<string, Expression> = Map<string, Expression>()
+
+  let sections: Expression[][] = [[]] 
 
   while (tkns.hasMore) {
     const token = tkns.next()
@@ -238,6 +329,8 @@ function parseBlock(tkns: Stream<l.Token>): BlockExpression {
       case "Newline":
         continue
       case "SectionStart": {
+        frontMatterSymbolTable ||= currentSectionSymbolTable
+        currentSectionSymbolTable = frontMatterSymbolTable
         block.startSection()
         continue
       }
@@ -252,20 +345,26 @@ function parseBlock(tkns: Stream<l.Token>): BlockExpression {
       }
       case "Symbol": {
         const nextToken = tkns.peek()
+        const scope = new ScopedExpression(currentSectionSymbolTable, STACK.findLast(e => e.type === "Scope") as ScopedExpression)
+        STACK.push(scope)
 
         if (!nextToken) {
           throw new Error("Unexpected end of tokens after Atom")
         }
 
         if (token.str === "yield") {
+          
           if (nextToken.type === "Symbol") {
             parseApplication(tkns)
+            scope.operand = STACK.pop()
+
             block.pushExr(Yield(STACK.pop()))
             continue
           }
           if (nextToken.type === "Indent") {
             tkns.next() // consume Indent
             parseBlock(tkns)
+            scope.operand = STACK.pop()
             block.pushExr(Yield(STACK.pop()))
             continue
           }
@@ -279,7 +378,11 @@ function parseBlock(tkns: Stream<l.Token>): BlockExpression {
           
           STACK.push(assignment)
           expressionChain(tkns)
-          assignment.setOperand(STACK.pop())
+          const operand = STACK.pop()
+          assignment.setOperand(operand)
+          scope.operand = STACK.pop()
+          
+          currentSectionSymbolTable = currentSectionSymbolTable.set(assignment.key, scope)
           
           block.pushExr(STACK.pop())
           continue
@@ -287,6 +390,7 @@ function parseBlock(tkns: Stream<l.Token>): BlockExpression {
 
         tkns.backtrack()
         parseApplication(tkns)
+        STACK.pop()
         block.pushExr(STACK.pop())
 
         break
@@ -311,31 +415,28 @@ function parseApplication(tkns: Stream<l.Token>) {
     const application = Application(atom.str)
     STACK.push(application)
     parseApplication(tkns)
-    if (STACK[STACK.length - 1].type !== "Function") {
+    if (STACK.at(-1).type !== "Function") {
       const operand = STACK.pop()
       application.operand = operand
     }
     return
   }
-
-  STACK.push(Application(atom.str))
-
+  const scope = STACK.findLast(x => x.type === "Scope")
+  const resolved = scope.resolve(atom.str)
+  if (!resolved) {
+    STACK.push(Application(atom.str))
+  }else{
+    STACK.push(resolved)
+    if (resolved.type === "Function") {
+      inlineFunction()
+    }
+  }
+  // STACK.push(Application(atom.str))
   expressionChain(tkns)
-
 }
 
-function parseOperator(tkns: Stream<l.Token>): boolean {
-  const operatorToken = tkns.peek()
-  switch (operatorToken.type) {
-    case "Pipeline": {
-      const lhs = unwindUntil("Block", "Assignment")
+function inlineFunction() {
 
-      return true
-    }
-
-  }
-
-  return false
 }
 
 function expressionChain(tkns: Stream<l.Token>) {
@@ -351,7 +452,7 @@ function expressionChain(tkns: Stream<l.Token>) {
     }
     case "EmptyObject": {
       tkns.consume()
-      STACK.push(Scalar({}))
+      STACK.push(Scalar({}, new UnitType()))
       return true
     }
     case "EmptyList": {
@@ -361,12 +462,12 @@ function expressionChain(tkns: Stream<l.Token>) {
     }
     case "String": {
       tkns.consume()
-      STACK.push(Scalar(tkn.str))
+      STACK.push(Scalar(tkn.str, new StringType(tkn.str)))
       return true
     }
     case "Number": {
       tkns.consume()
-      STACK.push(Scalar(tkn.num))
+      STACK.push(Scalar(tkn.num, new NumberType(tkn.num, tkn.num)))
       return true
     }
     case "Indent": {
@@ -378,6 +479,15 @@ function expressionChain(tkns: Stream<l.Token>) {
       parseApplication(tkns)
       return true
     }
+    case "Pipeline":
+    {
+      tkns.consume() // consume operator
+      const pipeline = new PipelineExpression()  
+      STACK.push(pipeline)
+      expressionChain(tkns)
+      return true
+
+  }
     case "Fn" : {
       tkns.consume() // consume operator
       parseFunctionDefinition(tkns)
@@ -410,7 +520,7 @@ function parseFunctionDefinition(tkns: Stream<l.Token>) {
 
   for (const id of ids) {
     const rhs = STACK.pop()
-    STACK.push(new FunctionExpression(id.identifier, rhs)) 
+    STACK.push(new FunctionDefinitionExpression(id.identifier, rhs)) 
   }
 }
 
@@ -440,6 +550,197 @@ function unwindWhile<T extends Expression["type"], U extends Extract<Expression,
 }
 
 
+function reduceAst(expr: Expression): Expression {
+  switch (expr.type) {
+    case "Merge": {
+      const left = reduceAst(expr.lhs)
+      const right = reduceAst(expr.rhs)
+
+      return merge(left, right)
+    }
+
+    case "Block": {
+      if (expr.sections.length === 0) {
+        return Unit()
+      }
+
+      if (expr.sections.length === 1 && expr.sections[0].length === 0) {
+        return Unit()
+      }
+
+      let frontmatter = Map<string, Expression>()
+      for (let i = 0; i < expr.sections.length; i++) {
+        const section = expr.sections[i]
+        let symbolTable = Map<string, Expression>()
+
+
+
+        if (i === 0){
+          frontmatter = symbolTable
+        }
+      }
+      return expr
+    }
+
+    case "Lift": {
+      const inner = reduceAst(expr.operand)
+      if (inner.type === "Vector") {
+        return inner
+      }
+      return Vector([inner])
+    }
+  }
+  return expr
+}
+
 function warn(msg: string) {
   console.warn("Warning: " + msg)
+}
+
+
+// type expression - for every value of 'type' in Expression, map to a function that takes that expression type
+type Visitor<T> = {
+  [K in Expression["type"] as K extends string ? Lowercase<K> : never]: (expr: Extract<Expression, { type: K }>) => T
+}
+
+
+export function getDataType(symbolTable: SymbolTable, expr: Expression): Type {
+  switch (expr.type) {
+    case "Unit":
+      return UnitTypeInstance
+    case "Scalar":
+      return expr.dataType!
+    case "Vector":
+      const types = expr.inner.map(e => getDataType(symbolTable, e))
+      return new VectorType(types)
+    case "Application":
+      if (check(symbolTable, expr.identifier)) {
+        const resolved = symbolTable.get(expr.identifier)
+        return getDataType(symbolTable, resolved)
+      }
+      return Unresolved
+    case "Function":
+      return Any
+    case "Lift":
+      const innerType = getDataType(symbolTable, expr.operand)
+      if (innerType instanceof VectorType) {
+        return innerType
+      }
+      return new VectorType([innerType])
+    case "Function":
+      return Any
+    case "Merge":
+      const lhs = getDataType(symbolTable, expr.lhs)
+      const rhs = getDataType(symbolTable, expr.rhs)
+
+      if (lhs instanceof VectorType && rhs instanceof VectorType) {
+        return new VectorType([...lhs.elementTypes, ...rhs.elementTypes])
+      }
+      return lhs
+    case "Yield":
+      return getDataType(symbolTable, expr.operand)
+    case "Block":
+      if (expr.sections.length === 0) return UnitTypeInstance
+
+      if (expr.sections.length === 1) {
+        return getSectionType(symbolTable, expr.sections[0])
+      }
+
+      const table = expr.sections[0].reduce((table, e) => {
+        if (e.type === "Assignment") {
+         return table.set(e.key, e.operand)
+        }
+        return table
+      }, symbolTable)
+
+      const sectionTypes = expr.sections.slice(1).map(section => getSectionType(table, section))
+
+      return new VectorType(sectionTypes)
+    case "Assignment":
+      return getDataType(symbolTable, expr.operand)
+    case "Pipeline":
+      return Any
+    case "Scope":
+      return getDataType(expr.symbolTable, expr.operand)
+    default:
+      return assertUnreachable(expr)
+  }
+}
+
+function getSectionType(table: SymbolTable, section: Expression[]): Type {
+  if (section.length === 0) {
+    return UnitTypeInstance
+  }
+  const struct = new StructType()
+  const vector = new VectorType([])
+
+  section.reduce(({ table, struct, vector }, expr) => {
+    if (expr.type === "Assignment") {    
+      const dataType = getDataType(table, expr.operand)
+      struct.addField(expr.key, dataType)
+      return { 
+        table: table.set(expr.key, expr.operand),
+        struct, vector 
+      }
+    }
+
+    if (expr.type === "Yield") {
+      const dataType = getDataType(table, expr.operand)
+      vector.addElementType(dataType)
+      return { table, struct, vector }
+    }
+
+
+    return { table, struct, vector }
+  }, { table, struct, vector })
+
+  if (vector.elementTypes.size > 0) {
+    return vector
+  }
+  return struct
+
+}
+
+
+function assertUnreachable(expr: never): never {
+    throw new Error("Didn't expect to get here");
+}
+
+
+type CheckedSymbol = string & { __checked: true };
+type SymbolTable = Map<string, Expression>;
+
+function check(table: SymbolTable, name: string): name is CheckedSymbol {
+  return table.has(name)
+}
+
+
+type TypeError = string
+
+export function* typeCheck(expr: Expression, type: Type): Generator<TypeError> {
+  const simple = reduceAst(expr)
+  switch (simple.type) {
+
+  }
+}
+
+function merge(lhs: Expression, rhs: Expression): Expression {
+  switch (lhs.type) {
+    case "Unit": {
+      return rhs
+    }
+    case "Vector": {
+      if (rhs.type === "Vector") {
+        return Vector([...lhs.inner, ...rhs.inner])
+      }
+
+      return Vector([...lhs.inner, rhs])
+    }
+    case "Block": {
+      if (rhs.type === "Block") {
+        
+      }
+    }
+  }
+  throw new Error("Merge not implemented for given types")
 }

@@ -1,20 +1,5 @@
-deployment:
-    apiVersion: v1
-    kind: Deployment
-    metadatata: 
-        name: foo
-    spec:
-        podTemplate:
-            containers:
-              name: app
-              image: app:1.0
-              ---
-              name: sidecar
-              image: istio:25
+scale:= dep rep -> |+
+    - dep
+    - spec:
+        replicas:= rep
 
-scale:= dep rep ->
-    dep + spec:
-            replicas:= rep
-
-scale deployment 3
-scale deployment 2

@@ -1,5 +1,5 @@
-import { resolve } from 'path';
 import * as e from './expression.ts';
+import { Any } from './type_system.ts';
 
 export default function astToFn(blk: e.Expression) {
     return (values: Object) => {
@@ -21,7 +21,7 @@ function expressionToFn(expr: e.Expression): Generator {
         case "Scalar":
             return () => expr.value
         case "Vector":
-            return () => expr.value
+            return vectorToFn(expr)
         case "Yield":
             return expressionToFn(expr.operand)
         case "Lift":
@@ -34,9 +34,18 @@ function expressionToFn(expr: e.Expression): Generator {
             return functionToFn(expr)
         case "Pipeline":
             throw new Error("Pipelines are not yet supported")
+            case "Scope":
+            return expressionToFn(expr.operand)
 
         default: 
             return assertUnreachable(expr)   
+    }
+}
+
+function vectorToFn(expr: e.VectorExpression): Generator {
+    const elementFns = expr.inner.map(expressionToFn)
+    return (ctx: Context) => {
+        return elementFns.map(fn => fn(ctx))
     }
 }
 
@@ -52,7 +61,7 @@ function blockToFn(block: e.BlockExpression): Generator {
         
         const c = cloneContext(ctx)
         for (const [key, value] of Object.entries(frontmatterResult)) {
-            c.identifiers.set(key, e.Scalar(value))
+            c.identifiers.set(key, e.Scalar(value, Any))
         }
         
         const results: Literal[] = []
@@ -217,13 +226,13 @@ function applicationToFn(expr: e.ApplicationExpression): Generator {
 }
 
 
-function functionToFn(expr: e.FunctionExpression): Generator {
-    const operandFn = expressionToFn(expr.operand)
+function functionToFn(expr: e.FunctionDefinitionExpression): Generator {
+    const operandFn = expressionToFn(expr.body)
     return (ctx: Context) => {
         const arg = ctx.stack.pop()
 
         const fnCtx = cloneContext(ctx)
-        fnCtx.identifiers.set(expr.identifier, e.Scalar(arg))
+        fnCtx.identifiers.set(expr.identifier, e.Scalar(arg, Any))
 
         const result = operandFn(fnCtx)
         ctx.stack.push(result)
@@ -238,52 +247,3 @@ function cloneContext(ctx: Context): Context {
         identifiers: new Map(ctx.identifiers),
     }
 }
-
-type Reducer<TVal, TAcc> = (acc?: TAcc, curr?: TVal) => TAcc
-
-type Transducer<TIn, TOut, TAcc> = (reducer: Reducer<TIn, TAcc>) => Reducer<TOut, TAcc>
-
-
-function scalar<T, U, V> (value: T): Transducer<T, U, V> {
-    return (step) => (a: V, _) => step(a, value)
-}
-
-function filter<T, U>(pattern: (value: T) => boolean): Transducer<T, T, U> { 
-    return (step) => (acc: U, curr: T) => {
-        if (pattern(curr)) {
-            return step(acc, curr)
-        }
-        return acc
-    }
-}
-
-function log(acc, curr) {
-    console.log({acc, curr})
-    return acc
-}
-
-function hardMerge() {
-    return (step) => (acc, current) => {
-        return step(acc, current)
-    }
-}
-
-function map(fn) {
-    return (step) => (acc = step(), curr) => {
-        return step(acc, fn(curr))
-    }
-}
-
-function compose(...fns) {
-    return fns.reduceRight((a, b) => (x, y) => b(a(x, y), y))
-}
-
-const arrayConcat = <T>(a: T[], c: T) =>  a.concat(c)
-
-const tx = compose(
-    filter((x: number) => x % 2 === 0),
-    map(x => x * 2),
-)(log)
-
-const r = [1,2,3,4,5,6].reduce(tx, [])
-console.log(r)
